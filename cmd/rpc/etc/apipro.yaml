@@ -1,0 +1,29 @@
+Name: apipro.rpc
+ListenOn: 127.0.0.1:3101
+Mode: dev
+
+CacheRedis:
+  Host: 127.0.0.1:6399
+  Type: node
+
+JwtSecret: "apipro-dev-secret-change-me-please-0123456789-abcdef"
+AccessTtl: 900s
+RefreshTtl: 604800s
+
+# Cache TTLs (seconds)
+CacheMatchListTtl: 60
+CacheMatchDetailTtl: 90
+CacheRoomDetailTtl: 30
+CacheCommentatorTtl: 120
+CacheLiveTtl: 15
+CacheUserProfileTtl: 120
+
+# Scheduled refresh intervals (seconds)
+RefreshMatchListTtl: 60
+RefreshLiveTtl: 15
+RefreshCommentatorTtl: 120
+
+# Chat
+ChatMaxMsgLen: 500
+ChatHistoryLim: 50
+ChatRatePerMin: 60

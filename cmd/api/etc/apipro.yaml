@@ -1,0 +1,31 @@
+Name: apipro
+Host: 0.0.0.0
+Port: 3100
+Mode: dev
+
+ApiproRpc:
+  Endpoints:
+    - 127.0.0.1:3101
+  NonBlock: true
+  Timeout: 2000000000
+
+Redis:
+  Host: 127.0.0.1:6399
+  Type: node
+
+Auth:
+  AccessSecret: "apipro-dev-secret-change-me-please-0123456789-abcdef"
+  AccessExpire: 900
+  RefreshExpire: 604800
+
+AccessTtl: 900s
+RefreshTtl: 604800s
+
+RateLimitPerMinute: 120
+RateLimitAuthPerMinute: 20
+
+ChatMaxMsgLen: 500
+ChatHistoryLim: 50
+ChatRatePerMin: 60
+
+CorsOrigin: "*"

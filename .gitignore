@@ -1,0 +1,15 @@
+# apipro
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+.env
+*.log
+.idea/
+.vscode/
+.DS_Store
+# keep generated dirs but they're committed for portability

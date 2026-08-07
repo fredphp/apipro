@@ -1,0 +1,268 @@
+syntax = "proto3";
+
+package apipro;
+
+option go_package = "./apipro";
+
+// ===== Common messages =====
+message Empty {}
+
+message PageReq {
+  int32 page = 1;
+  int32 pageSize = 2;
+}
+
+message DateReq {
+  string date = 1; // YYYYMMDD
+  int32 page = 2;
+  int32 pageSize = 3;
+}
+
+message IdReq {
+  string id = 1;
+}
+
+// ===== Auth / User =====
+message RegisterReq {
+  string loginName = 1;
+  string phone = 2;
+  string countryCode = 3;
+  string password = 4;
+  string smsCode = 5;
+}
+
+message LoginReq {
+  string phone = 1;
+  string countryCode = 2;
+  string password = 3;
+}
+
+message GuestReq {}
+
+message TokenResp {
+  string accessToken = 1;
+  string refreshToken = 2;
+  int64 expiresAt = 3; // unix seconds
+}
+
+message UserInfo {
+  string uid = 1;
+  string loginName = 2;
+  string nickName = 3;
+  string phone = 4;
+  string countryCode = 5;
+  int64 grow = 6;
+  int64 score = 7;
+  int32 level = 8;
+  string avatar = 9;
+  int32 isUser = 10; // 0 guest, 1 registered
+  int64 createdAt = 11;
+}
+
+message UserProfileResp {
+  UserInfo user = 1;
+}
+
+message RefreshReq {
+  string refreshToken = 1;
+}
+
+message UidReq {
+  string uid = 1;
+}
+
+// ===== Commentator / Anchor =====
+message Commentator {
+  string uid = 1;
+  string nickName = 2;
+  string icon = 3;
+  string cutOutIcon = 4;
+  string intro = 5;
+  int64 fans = 6;
+  int64 follow = 7;
+  int64 hot = 8;
+  Anchor anchor = 9;
+}
+
+message Anchor {
+  string uid = 1;
+  string roomNum = 2;
+  string detail = 3;
+  string notice = 4;
+  bool live = 5;
+}
+
+message CommentatorListResp {
+  repeated Commentator list = 1;
+  int64 total = 2;
+}
+
+message CommentatorDetailResp {
+  Commentator commentator = 1;
+}
+
+// ===== Match =====
+message MatchItem {
+  string scheduleId = 1;
+  string subCateName = 2;
+  string cateName = 3;
+  string matchTime = 4;
+  string hostName = 5;
+  string hostIcon = 6;
+  string guestName = 7;
+  string guestIcon = 8;
+  string venue = 9;
+  string status = 10; // not_started | living | over
+  int32 reservationStatus = 11; // 0 unknown,1 reserved,2 not reserved
+  repeated Commentator anchors = 12;
+}
+
+message MatchListResp {
+  repeated MatchItem list = 1;
+  int64 total = 2;
+  string date = 3;
+}
+
+message MatchRecommendResp {
+  repeated MatchItem list = 1;
+}
+
+message MatchDetailResp {
+  MatchItem match = 1;
+}
+
+message CateReq {
+  string cateName = 1;
+  int32 page = 2;
+  int32 pageSize = 3;
+}
+
+message CateListResp {
+  repeated string cateNames = 1;
+}
+
+// ===== Room =====
+message RoomNumReq {
+  string roomNum = 1;
+}
+
+message RoomDetail {
+  string roomNum = 1;
+  string title = 2;
+  string cover = 3;
+  bool live = 4;
+  int64 viewNum = 5;
+  string liveType = 6;
+  Commentator anchor = 7;
+  repeated string streamUrls = 8;
+  string notice = 9;
+  repeated string tags = 10;
+}
+
+message RoomDetailResp {
+  RoomDetail room = 1;
+}
+
+message RoomScheduleResp {
+  repeated MatchItem list = 1;
+}
+
+message RoomRankItem {
+  string uid = 1;
+  string nickName = 2;
+  string icon = 3;
+  int64 score = 4;
+  int32 rank = 5;
+}
+
+message RoomRankResp {
+  repeated RoomRankItem list = 1;
+}
+
+// ===== Live =====
+message LiveRoom {
+  string roomNum = 1;
+  string title = 2;
+  string cover = 3;
+  Commentator anchor = 4;
+  int64 viewNum = 5;
+  string liveType = 6;
+  string cateName = 7;
+}
+
+message LiveListResp {
+  repeated LiveRoom list = 1;
+  int64 total = 2;
+}
+
+message LiveType {
+  string code = 1;
+  string name = 2;
+  string icon = 3;
+}
+
+message LiveTypeListResp {
+  repeated LiveType list = 1;
+}
+
+message HotAnchorResp {
+  repeated Commentator list = 1;
+}
+
+// ===== Cache admin =====
+message CacheRefreshReq {
+  string family = 1; // match | live | commentator | room | user | all
+}
+
+message CacheRefreshResp {
+  bool ok = 1;
+  string message = 2;
+}
+
+message CacheStatsResp {
+  int64 hits = 1;
+  int64 misses = 2;
+  int64 keys = 3;
+  repeated FamilyStat families = 4;
+}
+
+message FamilyStat {
+  string family = 1;
+  int64 keys = 2;
+  int64 hits = 3;
+  int64 misses = 4;
+}
+
+service Apipro {
+  // auth
+  rpc Register(RegisterReq) returns (TokenResp);
+  rpc Login(LoginReq) returns (TokenResp);
+  rpc GuestLogin(GuestReq) returns (TokenResp);
+  rpc RefreshToken(RefreshReq) returns (TokenResp);
+  rpc GetUserProfile(UidReq) returns (UserProfileResp);
+
+  // commentator
+  rpc CommentatorList(PageReq) returns (CommentatorListResp);
+  rpc CommentatorDetail(IdReq) returns (CommentatorDetailResp);
+
+  // match
+  rpc MatchListByDate(DateReq) returns (MatchListResp);
+  rpc MatchRecommend(Empty) returns (MatchRecommendResp);
+  rpc MatchDetail(IdReq) returns (MatchDetailResp);
+  rpc MatchCateList(Empty) returns (CateListResp);
+  rpc MatchListByCate(CateReq) returns (MatchListResp);
+
+  // room
+  rpc RoomDetail(RoomNumReq) returns (RoomDetailResp);
+  rpc RoomSchedule(RoomNumReq) returns (RoomScheduleResp);
+  rpc RoomRank(RoomNumReq) returns (RoomRankResp);
+
+  // live
+  rpc LiveList(PageReq) returns (LiveListResp);
+  rpc LiveTypeList(Empty) returns (LiveTypeListResp);
+  rpc HotAnchor(Empty) returns (HotAnchorResp);
+
+  // cache admin
+  rpc RefreshCache(CacheRefreshReq) returns (CacheRefreshResp);
+  rpc CacheStats(Empty) returns (CacheStatsResp);
+}
