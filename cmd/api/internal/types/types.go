@@ -107,7 +107,8 @@ type LiveTypeListResp struct {
 type LoginReq struct {
 	Phone       string `json:"phone"`
 	CountryCode string `json:"countryCode"`
-	Password    string `json:"password"`
+	Password    string `json:"password"` // client-encrypted md5
+	PwdType     int32  `json:"pwdType,optional"`
 }
 
 type MatchDetailResp struct {
@@ -152,8 +153,10 @@ type RegisterReq struct {
 	LoginName   string `json:"loginName"`
 	Phone       string `json:"phone"`
 	CountryCode string `json:"countryCode"`
-	Password    string `json:"password"`
+	Password    string `json:"password"` // client-encrypted md5
 	SmsCode     string `json:"smsCode"`
+	NickName    string `json:"nickName,optional"`
+	PwdType     int32  `json:"pwdType,optional"`
 }
 
 type RoomDetailJson struct {

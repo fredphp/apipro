@@ -35,7 +35,7 @@ func (l *MatchListByDateLogic) MatchListByDate(in *apipro.DateReq) (*apipro.Matc
 	page, pageSize := fixture.ParsePage(in.Page, in.PageSize)
 	ttl := time.Duration(l.svcCtx.Config.CacheMatchListTtl) * time.Second
 	list, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", "date:"+date, ttl, func() ([]fixture.MatchItem, error) {
-		return fixture.MatchesByDate(date), nil
+		return svc.LoadMatchesByDate(l.ctx, l.svcCtx.Models, date)
 	})
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func NewMatchRecommendLogic(ctx context.Context, svcCtx *svc.ServiceContext) *Ma
 func (l *MatchRecommendLogic) MatchRecommend(in *apipro.Empty) (*apipro.MatchRecommendResp, error) {
 	ttl := time.Duration(l.svcCtx.Config.CacheMatchListTtl) * time.Second
 	list, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", "recommend", ttl, func() ([]fixture.MatchItem, error) {
-		return fixture.Recommend(), nil
+		return svc.LoadRecommend(l.ctx, l.svcCtx.Models)
 	})
 	if err != nil {
 		return nil, err
@@ -85,11 +85,7 @@ func (l *MatchDetailLogic) MatchDetail(in *apipro.IdReq) (*apipro.MatchDetailRes
 	}
 	ttl := time.Duration(l.svcCtx.Config.CacheMatchDetailTtl) * time.Second
 	m, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", "detail:"+in.Id, ttl, func() (fixture.MatchItem, error) {
-		mm, ok := fixture.MatchByID(in.Id)
-		if !ok {
-			return fixture.MatchItem{}, errors.New("match not found")
-		}
-		return mm, nil
+		return svc.LoadMatchByID(l.ctx, l.svcCtx.Models, in.Id)
 	})
 	if err != nil {
 		return nil, err
@@ -111,7 +107,7 @@ func NewMatchCateListLogic(ctx context.Context, svcCtx *svc.ServiceContext) *Mat
 func (l *MatchCateListLogic) MatchCateList(in *apipro.Empty) (*apipro.CateListResp, error) {
 	ttl := time.Duration(l.svcCtx.Config.CacheMatchListTtl) * time.Second
 	cates, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", "cates", ttl, func() ([]string, error) {
-		return fixture.CateNames(), nil
+		return l.svcCtx.Models.Matches.ListCateNames(l.ctx)
 	})
 	if err != nil {
 		return nil, err
@@ -137,7 +133,7 @@ func (l *MatchListByCateLogic) MatchListByCate(in *apipro.CateReq) (*apipro.Matc
 	page, pageSize := fixture.ParsePage(in.Page, in.PageSize)
 	ttl := time.Duration(l.svcCtx.Config.CacheMatchListTtl) * time.Second
 	list, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", "cate:"+in.CateName, ttl, func() ([]fixture.MatchItem, error) {
-		return fixture.MatchesByCate(in.CateName), nil
+		return svc.LoadMatchesByCate(l.ctx, l.svcCtx.Models, in.CateName)
 	})
 	if err != nil {
 		return nil, err

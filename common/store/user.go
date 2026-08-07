@@ -1,23 +1,30 @@
 package store
 
-// Redis-backed user store. Users are persisted in Redis so the service is stateless.
-// Keys:
-//   apipro:user:uid:<uid>          -> JSON of public user record (NO password)
-//   apipro:user:pwd:<uid>          -> bcrypt password hash
-//   apipro:user:phone:<cc>:<phone> -> uid lookup
-//   apipro:user:loginname:<name>   -> uid lookup
+// MySQL-backed user store with zbyy-compatible password encryption.
+//
+// The zbyy client encrypts the password BEFORE sending it to the server:
+//   md5Pwd(password, pwdType):
+//     pwdType 2 => md5(password)
+//     pwdType 1 => md5( md5(password.toLowerCase()) + "&%*$8@!!%" )
+//
+// Therefore the server stores the client-sent encrypted string as-is and
+// compares it directly on login. The server NEVER sees the raw password.
+//
+// For convenience, if the API receives a raw password (PwdTypeRaw flag),
+// the server can compute the hash via auth.Md5Pwd — but the normal client
+// flow sends the pre-encrypted value.
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"apipro/common/auth"
+	"apipro/common/model"
 	"apipro/pkg/fixture"
 
 	"github.com/zeromicro/go-zero/core/stores/redis"
-	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -27,111 +34,131 @@ var (
 )
 
 type UserStore struct {
-	rdb *redis.Redis
+	users *model.UserModel
+	rdb   *redis.Redis // for optional session caching
 }
 
-func NewUserStore(rdb *redis.Redis) *UserStore {
-	return &UserStore{rdb: rdb}
+func NewUserStore(users *model.UserModel, rdb *redis.Redis) *UserStore {
+	return &UserStore{users: users, rdb: rdb}
 }
-
-func phoneKey(cc, phone string) string { return "apipro:user:phone:" + cc + ":" + phone }
-func loginNameKey(name string) string  { return "apipro:user:loginname:" + strings.ToLower(name) }
-func uidKey(uid string) string         { return "apipro:user:uid:" + uid }
-func pwdKey(uid string) string         { return "apipro:user:pwd:" + uid }
 
 // Register creates a new user.
-func (s *UserStore) Register(ctx context.Context, loginName, cc, phone, password string) (fixture.UserRecord, error) {
+//   loginName  — unique login name
+//   cc         — country code e.g. "+86"
+//   phone      — phone number
+//   password   — the CLIENT-ENCRYPTED md5 string (zbyy md5Pwd)
+//   pwdType    — 1 or 2 (matches zbyy client)
+//   nickName   — display name (optional, defaults to loginName)
+//
+// If the caller passes a raw password instead, set rawPw=true and the server
+// will compute auth.Md5Pwd(password, pwdType) before storing.
+func (s *UserStore) Register(ctx context.Context, loginName, cc, phone, password string, pwdType int32, nickName string, rawPw bool) (fixture.UserRecord, error) {
 	loginName = strings.TrimSpace(loginName)
 	phone = strings.TrimSpace(phone)
 	cc = strings.TrimSpace(cc)
-	if loginName == "" || phone == "" || cc == "" || password == "" {
+	nickName = strings.TrimSpace(nickName)
+	if nickName == "" {
+		nickName = loginName
+	}
+	if loginName == "" || phone == "" || cc == "" {
 		return fixture.UserRecord{}, errors.New("missing fields")
 	}
-	if len(password) < 6 || len(password) > 64 {
-		return fixture.UserRecord{}, errors.New("password length must be 6-64")
+	if password == "" {
+		return fixture.UserRecord{}, errors.New("missing password")
 	}
-	if exists, _ := s.rdb.Exists(phoneKey(cc, phone)); exists {
-		return fixture.UserRecord{}, ErrUserExists
+
+	// Compute the stored hash.
+	var storedPwd string
+	if rawPw {
+		storedPwd = auth.Md5Pwd(password, int(pwdType))
+	} else {
+		// Client already encrypted — store as-is.
+		storedPwd = password
 	}
-	if exists, _ := s.rdb.Exists(loginNameKey(loginName)); exists {
-		return fixture.UserRecord{}, ErrUserExists
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), 10)
-	if err != nil {
-		return fixture.UserRecord{}, err
-	}
+
 	uid := fixture.GenUid("U")
-	rec := fixture.UserRecord{
-		Uid: uid, LoginName: loginName, NickName: loginName,
-		Phone: phone, CountryCode: cc, Password: "",
+	u := &model.User{
+		Uid: uid, LoginName: loginName, NickName: nickName,
+		Phone: phone, CountryCode: cc, Password: storedPwd, PwdType: pwdType,
 		Grow: 0, Score: 0, Level: 1,
-		Avatar:  "https://cdn.zbyy.example/avatar/default.png",
-		IsUser:  1, CreatedAt: nowUnix(),
+		Avatar: "https://cdn.zbyy.example/avatar/default.png",
+		IsUser: 1,
 	}
-	// store public record (no password) + password hash separately
-	b, _ := json.Marshal(rec)
-	if err := s.rdb.Set(uidKey(uid), string(b)); err != nil {
+	if err := s.users.Insert(ctx, u); err != nil {
+		if errors.Is(err, model.ErrDuplicate) {
+			return fixture.UserRecord{}, ErrUserExists
+		}
 		return fixture.UserRecord{}, err
 	}
-	_ = s.rdb.Set(pwdKey(uid), string(hash))
-	_ = s.rdb.Set(phoneKey(cc, phone), uid)
-	_ = s.rdb.Set(loginNameKey(loginName), uid)
-	return rec, nil
+	return toRecord(u), nil
 }
 
 // Login validates credentials.
-func (s *UserStore) Login(ctx context.Context, cc, phone, password string) (fixture.UserRecord, error) {
-	uid, err := s.rdb.Get(phoneKey(cc, phone))
-	if err != nil || uid == "" {
-		return fixture.UserRecord{}, ErrUserNotFound
-	}
-	rec, err := s.getByUid(uid)
+//   password — the CLIENT-ENCRYPTED md5 string (zbyy md5Pwd)
+// If rawPw=true, the server computes auth.Md5Pwd(password, pwdType) first.
+func (s *UserStore) Login(ctx context.Context, cc, phone, password string, pwdType int32, rawPw bool) (fixture.UserRecord, error) {
+	u, err := s.users.FindByPhone(ctx, cc, phone)
 	if err != nil {
+		if errors.Is(err, model.ErrNotFound) {
+			return fixture.UserRecord{}, ErrUserNotFound
+		}
 		return fixture.UserRecord{}, err
 	}
-	hash, err := s.rdb.Get(pwdKey(uid))
-	if err != nil || hash == "" {
+
+	var candidate string
+	if rawPw {
+		candidate = auth.Md5Pwd(password, int(pwdType))
+	} else {
+		candidate = password
+	}
+
+	if !auth.Verify(candidate, u.Password) {
 		return fixture.UserRecord{}, ErrInvalidPassword
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
-		return fixture.UserRecord{}, ErrInvalidPassword
-	}
-	return rec, nil
+	return toRecord(u), nil
 }
 
 // GetByUid fetches a user by uid.
 func (s *UserStore) GetByUid(ctx context.Context, uid string) (fixture.UserRecord, error) {
-	return s.getByUid(uid)
-}
-
-func (s *UserStore) getByUid(uid string) (fixture.UserRecord, error) {
-	raw, err := s.rdb.Get(uidKey(uid))
-	if err != nil || raw == "" {
-		return fixture.UserRecord{}, ErrUserNotFound
-	}
-	var rec fixture.UserRecord
-	if err := json.Unmarshal([]byte(raw), &rec); err != nil {
+	u, err := s.users.FindByUid(ctx, uid)
+	if err != nil {
+		if errors.Is(err, model.ErrNotFound) {
+			return fixture.UserRecord{}, ErrUserNotFound
+		}
 		return fixture.UserRecord{}, err
 	}
-	return rec, nil
+	return toRecord(u), nil
 }
 
-// CreateGuest creates a transient guest user (24h TTL).
+// CreateGuest creates a transient guest user (persisted, is_user=0).
 func (s *UserStore) CreateGuest(ctx context.Context) (fixture.UserRecord, error) {
 	uid := fixture.GenUid("G")
-	rec := fixture.UserRecord{
-		Uid: uid, LoginName: "", NickName: "游客" + uid[len(uid)-4:],
-		Phone: "", CountryCode: "", Password: "",
+	suffix := uid[len(uid)-4:]
+	u := &model.User{
+		Uid: uid, LoginName: "", NickName: "游客" + suffix,
+		Phone: "", CountryCode: "", Password: "", PwdType: 1,
 		Grow: 0, Score: 0, Level: 1,
-		Avatar:  "https://cdn.zbyy.example/avatar/guest.png",
-		IsUser:  0, CreatedAt: nowUnix(),
+		Avatar: "https://cdn.zbyy.example/avatar/guest.png",
+		IsUser: 0,
 	}
-	b, _ := json.Marshal(rec)
-	_ = s.rdb.Setex(uidKey(uid), string(b), 24*3600)
-	return rec, nil
+	if err := s.users.Insert(ctx, u); err != nil {
+		// Guests have no unique phone/login_name; duplicate-key shouldn't trigger,
+		// but if it does (empty phone clash), fall back to a random suffix.
+		u.LoginName = "guest_" + suffix
+		u.Phone = ""
+		_ = s.users.Insert(ctx, u)
+	}
+	return toRecord(u), nil
 }
 
-func nowUnix() int64 { return fixture.NowUnix() }
+func toRecord(u *model.User) fixture.UserRecord {
+	return fixture.UserRecord{
+		Uid: u.Uid, LoginName: u.LoginName, NickName: u.NickName,
+		Phone: u.Phone, CountryCode: u.CountryCode, Password: "",
+		Grow: u.Grow, Score: u.Score, Level: u.Level,
+		Avatar: u.Avatar, IsUser: u.IsUser, CreatedAt: u.CreatedAt,
+	}
+}
 
 // DebugString for logging
 func (s *UserStore) DebugString(rec fixture.UserRecord) string {

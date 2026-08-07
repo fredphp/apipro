@@ -26,7 +26,7 @@ func (l *LiveListLogic) LiveList(in *apipro.PageReq) (*apipro.LiveListResp, erro
 	page, pageSize := fixture.ParsePage(in.Page, in.PageSize)
 	ttl := time.Duration(l.svcCtx.Config.CacheLiveTtl) * time.Second
 	all, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "live", "list", ttl, func() ([]fixture.LiveRoom, error) {
-		return fixture.Lives(), nil
+		return svc.LoadLiveRooms(l.ctx, l.svcCtx.Models)
 	})
 	if err != nil {
 		return nil, err
@@ -49,7 +49,7 @@ func NewLiveTypeListLogic(ctx context.Context, svcCtx *svc.ServiceContext) *Live
 func (l *LiveTypeListLogic) LiveTypeList(in *apipro.Empty) (*apipro.LiveTypeListResp, error) {
 	ttl := time.Duration(l.svcCtx.Config.CacheLiveTtl) * time.Second
 	all, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "live", "types", ttl, func() ([]fixture.LiveType, error) {
-		return fixture.LiveTypes(), nil
+		return svc.LoadLiveTypes(l.ctx, l.svcCtx.Models)
 	})
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func NewHotAnchorLogic(ctx context.Context, svcCtx *svc.ServiceContext) *HotAnch
 func (l *HotAnchorLogic) HotAnchor(in *apipro.Empty) (*apipro.HotAnchorResp, error) {
 	ttl := time.Duration(l.svcCtx.Config.CacheLiveTtl) * time.Second
 	all, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "live", "hot", ttl, func() ([]fixture.Commentator, error) {
-		return fixture.HotAnchors(6), nil
+		return svc.LoadHotAnchors(l.ctx, l.svcCtx.Models, 6)
 	})
 	if err != nil {
 		return nil, err

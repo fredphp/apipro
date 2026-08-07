@@ -1,35 +1,39 @@
 package config
 
 import (
-        "time"
+	"time"
 
-        "github.com/zeromicro/go-zero/core/stores/redis"
-        "github.com/zeromicro/go-zero/zrpc"
+	"github.com/zeromicro/go-zero/core/stores/redis"
+	"github.com/zeromicro/go-zero/zrpc"
 )
 
 type Config struct {
-        zrpc.RpcServerConf
-        CacheRedis redis.RedisConf
+	zrpc.RpcServerConf
+	CacheRedis redis.RedisConf
 
-        JwtSecret string
-        AccessTtl time.Duration
-        RefreshTtl time.Duration
+	// Database (MySQL for production; sqlite for dev/self-check)
+	DBDriver   string `json:",default=mysql"`        // mysql | sqlite
+	DataSource string `json:",optional"`             // DSN
 
-        // Cache TTLs (seconds)
-        CacheMatchListTtl     int `json:",default=60"`
-        CacheMatchDetailTtl   int `json:",default=90"`
-        CacheRoomDetailTtl    int `json:",default=30"`
-        CacheCommentatorTtl   int `json:",default=120"`
-        CacheLiveTtl          int `json:",default=15"`
-        CacheUserProfileTtl   int `json:",default=120"`
+	JwtSecret  string
+	AccessTtl  time.Duration
+	RefreshTtl time.Duration
 
-        // Scheduled refresh intervals (seconds)
-        RefreshMatchListTtl    int `json:",default=60"`
-        RefreshLiveTtl         int `json:",default=15"`
-        RefreshCommentatorTtl  int `json:",default=120"`
+	// Cache TTLs (seconds)
+	CacheMatchListTtl   int `json:",default=60"`
+	CacheMatchDetailTtl int `json:",default=90"`
+	CacheRoomDetailTtl  int `json:",default=30"`
+	CacheCommentatorTtl int `json:",default=120"`
+	CacheLiveTtl        int `json:",default=15"`
+	CacheUserProfileTtl int `json:",default=120"`
 
-        // chat
-        ChatMaxMsgLen  int `json:",default=500"`
-        ChatHistoryLim int `json:",default=50"`
-        ChatRatePerMin int `json:",default=60"`
+	// Scheduled refresh intervals (seconds)
+	RefreshMatchListTtl   int `json:",default=60"`
+	RefreshLiveTtl        int `json:",default=15"`
+	RefreshCommentatorTtl int `json:",default=120"`
+
+	// chat
+	ChatMaxMsgLen  int `json:",default=500"`
+	ChatHistoryLim int `json:",default=50"`
+	ChatRatePerMin int `json:",default=60"`
 }

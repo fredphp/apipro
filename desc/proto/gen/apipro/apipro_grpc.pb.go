@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.5.1
 // - protoc             v5.29.3
-// source: desc/proto/apipro.proto
+// source: apipro.proto
 
 package apipro
 
@@ -851,5 +851,5 @@ var Apipro_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "desc/proto/apipro.proto",
+	Metadata: "apipro.proto",
 }

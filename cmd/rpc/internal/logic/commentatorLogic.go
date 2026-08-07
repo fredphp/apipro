@@ -27,7 +27,7 @@ func (l *CommentatorListLogic) CommentatorList(in *apipro.PageReq) (*apipro.Comm
 	page, pageSize := fixture.ParsePage(in.Page, in.PageSize)
 	ttl := time.Duration(l.svcCtx.Config.CacheCommentatorTtl) * time.Second
 	all, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "commentator", "list", ttl, func() ([]fixture.Commentator, error) {
-		return fixture.Commentators(), nil
+		return svc.LoadCommentators(l.ctx, l.svcCtx.Models)
 	})
 	if err != nil {
 		return nil, err
@@ -53,11 +53,7 @@ func (l *CommentatorDetailLogic) CommentatorDetail(in *apipro.IdReq) (*apipro.Co
 	}
 	ttl := time.Duration(l.svcCtx.Config.CacheCommentatorTtl) * time.Second
 	c, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "commentator", "uid:"+in.Id, ttl, func() (fixture.Commentator, error) {
-		cc, ok := fixture.CommentatorByID(in.Id)
-		if !ok {
-			return fixture.Commentator{}, errors.New("commentator not found")
-		}
-		return cc, nil
+		return svc.LoadCommentator(l.ctx, l.svcCtx.Models, in.Id)
 	})
 	if err != nil {
 		return nil, err

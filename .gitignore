@@ -12,4 +12,8 @@ bin/
 .idea/
 .vscode/
 .DS_Store
+# SQLite dev database (do not commit; use seed tool to recreate)
+data/
+*.db
+*.db-journal
 # keep generated dirs but they're committed for portability

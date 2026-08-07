@@ -23,18 +23,23 @@ message IdReq {
 }
 
 // ===== Auth / User =====
+// Password is the CLIENT-ENCRYPTED md5 string (zbyy md5Pwd algorithm).
+// pwdType: 1 = md5(md5(lower)+secret), 2 = md5(password).
 message RegisterReq {
   string loginName = 1;
   string phone = 2;
   string countryCode = 3;
-  string password = 4;
+  string password = 4;      // client-encrypted md5
   string smsCode = 5;
+  string nickName = 6;
+  int32 pwdType = 7;        // 1 or 2 (default 1)
 }
 
 message LoginReq {
   string phone = 1;
   string countryCode = 2;
-  string password = 3;
+  string password = 3;      // client-encrypted md5
+  int32 pwdType = 4;        // 1 or 2 (default 1)
 }
 
 message GuestReq {}

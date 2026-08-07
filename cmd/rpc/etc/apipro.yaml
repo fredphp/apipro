@@ -2,6 +2,17 @@ Name: apipro.rpc
 ListenOn: 127.0.0.1:3101
 Mode: dev
 
+# ----- Database (数据来源) -----
+# Production: MySQL
+#   DBDriver: mysql
+#   DataSource: user:password@tcp(127.0.0.1:3306)/apipro?charset=utf8mb4&parseTime=true&loc=Local
+# Dev / self-check: SQLite (no server needed)
+#   DBDriver: sqlite
+#   DataSource: ./data/apipro.db
+DBDriver: sqlite
+DataSource: ./data/apipro.db
+
+# ----- Redis (缓存 + 定时刷新) -----
 CacheRedis:
   Host: 127.0.0.1:6399
   Type: node

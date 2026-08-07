@@ -29,11 +29,7 @@ func (l *RoomDetailLogic) RoomDetail(in *apipro.RoomNumReq) (*apipro.RoomDetailR
 	}
 	ttl := time.Duration(l.svcCtx.Config.CacheRoomDetailTtl) * time.Second
 	r, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "room", "num:"+in.RoomNum, ttl, func() (fixture.RoomDetail, error) {
-		rr, ok := fixture.RoomByNum(in.RoomNum)
-		if !ok {
-			return fixture.RoomDetail{}, errors.New("room not found")
-		}
-		return rr, nil
+		return svc.LoadRoomDetail(l.ctx, l.svcCtx.Models, in.RoomNum)
 	})
 	if err != nil {
 		return nil, err
@@ -57,17 +53,7 @@ func (l *RoomScheduleLogic) RoomSchedule(in *apipro.RoomNumReq) (*apipro.RoomSch
 	}
 	ttl := time.Duration(l.svcCtx.Config.CacheRoomDetailTtl) * time.Second
 	list, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "room", "schedule:"+in.RoomNum, ttl, func() ([]fixture.MatchItem, error) {
-		// matches where any anchor's roomNum == in.RoomNum
-		var out []fixture.MatchItem
-		for _, m := range fixture.AllMatches() {
-			for _, a := range m.Anchors {
-				if a.Anchor.RoomNum == in.RoomNum {
-					out = append(out, m)
-					break
-				}
-			}
-		}
-		return out, nil
+		return svc.LoadMatchesByAnchorRoom(l.ctx, l.svcCtx.Models, in.RoomNum)
 	})
 	if err != nil {
 		return nil, err
@@ -91,7 +77,7 @@ func (l *RoomRankLogic) RoomRank(in *apipro.RoomNumReq) (*apipro.RoomRankResp, e
 	}
 	ttl := time.Duration(l.svcCtx.Config.CacheRoomDetailTtl) * time.Second
 	list, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "room", "rank:"+in.RoomNum, ttl, func() ([]fixture.RoomRankItem, error) {
-		return fixture.RankByRoom(in.RoomNum), nil
+		return svc.LoadRoomRank(l.ctx, l.svcCtx.Models, in.RoomNum)
 	})
 	if err != nil {
 		return nil, err
