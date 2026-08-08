@@ -29,6 +29,9 @@ type ServiceContext struct {
         Sessions  *auth.SessionStore
         SmsStore  *SmsStore
         UserAsset UserAssetPrefixer
+
+        // AllocUID atomically reserves a new uid via Redis INCR (AUDIT-008).
+        AllocUID func(ctx context.Context) (int64, error)
 }
 
 // Models bundles all data models for convenient access from logic.
@@ -80,10 +83,29 @@ func NewServiceContext(c config.Config) *ServiceContext {
         sessions := auth.NewSessionStore(rdb)
 
         // SMS code store (Redis).
-        sms := NewSmsStore(rdb, c.Mode, c.SmsDevBypassCode)
+        // AUDIT-002: use c.AppMode (dev|prod) — NOT c.Mode which is go-zero's
+        // ServiceConf.Mode (defaults to "pro" and never equals "dev").
+        sms := NewSmsStore(rdb, c.AppMode, c.SmsDevBypassCode)
 
         // Bootstrap chat message ID counter from DB.
         bootChatMsgIDCounter(context.Background(), rdb, models.ChatMessages)
+
+        // AUDIT-008: bootstrap UID counter from MAX(uid) so the first INCR
+        // returns a value strictly greater than any existing uid.
+        bootUIDCounter(context.Background(), rdb, models.Users)
+
+        // AllocUID reserves a new uid atomically via Redis INCR. Falls back to
+        // the DB-based NextUID if Redis is unavailable (best-effort).
+        allocUID := func(ctx context.Context) (int64, error) {
+                if rdb != nil {
+                        uid, err := rdb.IncrCtx(ctx, "yuyan:uid:next")
+                        if err == nil {
+                                return uid, nil
+                        }
+                        logx.Errorf("AllocUID: redis incr failed: %v — falling back to DB", err)
+                }
+                return models.Users.NextUID(ctx)
+        }
 
         // ---- Scheduled cache refresh ----
         // Each job reads from the DB and warms the Redis cache so that hot keys
@@ -127,6 +149,7 @@ func NewServiceContext(c config.Config) *ServiceContext {
                 Config: c, Redis: rdb, Cache: ch, Scheduler: sch,
                 Models: models, Sessions: sessions, SmsStore: sms,
                 UserAsset: UserAssetPrefixer{Base: c.FileBaseURL},
+                AllocUID:  allocUID,
         }
 }
 
@@ -151,6 +174,27 @@ func bootChatMsgIDCounter(ctx context.Context, rdb *redis.Redis, m *model.ChatRo
                 // Try to set; if key already exists with a higher value, INCR will keep going.
                 _ = rdb.Set("yuyan:chat:message_id", fmt.Sprintf("%d", maxID))
         }
+}
+
+// bootUIDCounter seeds the Redis yuyan:uid:next counter from DB MAX(uid) on
+// first startup (AUDIT-008). Uses SETNX so a pre-existing counter (e.g. from
+// a prior run with higher uids) is never lowered.
+func bootUIDCounter(ctx context.Context, rdb *redis.Redis, m *model.UserModel) {
+        if rdb == nil {
+                return
+        }
+        maxUID, err := m.MaxUID(ctx)
+        if err != nil {
+                logx.Errorf("boot uid counter: %v", err)
+                return
+        }
+        // Floor at 5000 so the first INCR returns 5001+ (avoids clashing with
+        // seeded anchors 1001-1003 and the demo user 5001).
+        if maxUID < 5000 {
+                maxUID = 5000
+        }
+        // SETNX: only sets if missing — never overwrites a higher counter.
+        _, _ = rdb.Setnx("yuyan:uid:next", fmt.Sprintf("%d", maxUID))
 }
 
 // ----- warm helpers (write-through to cache) -----

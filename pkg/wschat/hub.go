@@ -35,6 +35,7 @@ import (
         "time"
 
         "apipro/common/auth"
+        "apipro/common/model"
 
         "github.com/gorilla/websocket"
         "github.com/zeromicro/go-zero/core/logx"
@@ -44,16 +45,18 @@ import (
 // ----- Opcodes (match backend-zero internal/ws/opcode.go) -----
 
 const (
-        OpHeart          uint16 = 1000 // client → server
-        OpLogin          uint16 = 1001
-        OpLogout         uint16 = 1002
-        OpRoomEnter      uint16 = 1003
-        OpRoomLeave      uint16 = 1004
-        OpComment        uint16 = 1005
-        OpCommentDelete  uint16 = 1006
-        OpLike           uint16 = 1007 // legacy alias
-        OpGift           uint16 = 1010 // legacy alias (was OpSessionResume in backend-zero)
-        OpSessionResume  uint16 = 1010
+        OpHeart         uint16 = 1000 // client → server
+        OpLogin         uint16 = 1001
+        OpLogout        uint16 = 1002
+        OpRoomEnter     uint16 = 1003
+        OpRoomLeave     uint16 = 1004
+        OpComment       uint16 = 1005
+        OpCommentDelete uint16 = 1006
+        OpLike          uint16 = 1007 // legacy alias
+        // AUDIT-009: opcode 1010 is SESSION_RESUME in backend-zero (M-AUTH-007).
+        // Real gift-sending is unimplemented on the WS channel — clients use
+        // the /gift/sendGift HTTP endpoint instead.
+        OpSessionResume uint16 = 1010
 
         OpHeartSuccess         uint16 = 2000 // server → client ack
         OpLoginSuccess         uint16 = 2001
@@ -63,7 +66,8 @@ const (
         OpCommentSuccess       uint16 = 2005
         OpCommentDeleteSuccess uint16 = 2006
         OpLikeSuccess          uint16 = 2007
-        OpGiftSuccess          uint16 = 2010
+        // AUDIT-009: renamed from OpGiftSuccess; same opcode 2010.
+        OpSessionResumeSuccess uint16 = 2010
 
         OpCommentPush        uint16 = 3000 // server → client push
         OpCommentPushDelete  uint16 = 3001
@@ -116,14 +120,21 @@ type Client struct {
         mu     sync.Mutex
 
         // session state
-        uid       int64
-        nickName  string
-        icon      string
-        isGuest   bool
+        uid           int64
+        nickName      string
+        icon          string
+        isGuest       bool
         authenticated bool
+
+        // AUDIT-012: client IP for IP-ban enforcement.
+        ip string
 
         // rooms the client is currently in (set lookup)
         rooms map[string]struct{}
+
+        // AUDIT-011: rooms where the client is muted because the room is not live.
+        // Set on room-enter when LiveStatus != 1; cleared on room-leave.
+        mutedRooms map[string]bool
 
         // rate limiting
         sendTimes []int64
@@ -131,19 +142,29 @@ type Client struct {
 
 // Hub manages all clients + rooms.
 type Hub struct {
-        mu          sync.RWMutex
-        rooms       map[string]map[*Client]struct{}
-        rdb         *redis.Redis
-        sessions    *auth.SessionStore
-        maxMsgLen   int
-        historyLim  int
-        ratePerMin  int
-        reqKey      []byte // decrypt client→server
-        respKey     []byte // encrypt server→client
+        mu         sync.RWMutex
+        rooms      map[string]map[*Client]struct{}
+        rdb        *redis.Redis
+        sessions   *auth.SessionStore
+        maxMsgLen  int
+        historyLim int
+        ratePerMin int
+        reqKey     []byte // decrypt client→server
+        respKey    []byte // encrypt server→client
+
+        // AUDIT-010/011/012: models for chat persistence + room live-status
+        // checks + user-status checks. Any may be nil — handlers no-op gracefully.
+        chatMessages *model.ChatRoomMessageModel
+        roomsModel   *model.LiveRoomModel
+        usersModel   *model.UserModel
 }
 
 // NewHub constructs a Hub. The session store is created lazily from rdb.
-func NewHub(rdb *redis.Redis, respKey, reqKey []byte, maxMsgLen, historyLim, ratePerMin int) *Hub {
+// AUDIT-010/011/012: chatMessages, roomsModel, usersModel are optional (may be
+// nil); when set, the hub persists chat to MySQL, enforces live-status on
+// room-enter, and checks user-status/IP-ban on comment.
+func NewHub(rdb *redis.Redis, respKey, reqKey []byte, maxMsgLen, historyLim, ratePerMin int,
+        chatMessages *model.ChatRoomMessageModel, roomsModel *model.LiveRoomModel, usersModel *model.UserModel) *Hub {
         if maxMsgLen <= 0 {
                 maxMsgLen = 500
         }
@@ -154,14 +175,17 @@ func NewHub(rdb *redis.Redis, respKey, reqKey []byte, maxMsgLen, historyLim, rat
                 ratePerMin = 60
         }
         return &Hub{
-                rooms:      map[string]map[*Client]struct{}{},
-                rdb:        rdb,
-                sessions:   auth.NewSessionStore(rdb),
-                maxMsgLen:  maxMsgLen,
-                historyLim: historyLim,
-                ratePerMin: ratePerMin,
-                reqKey:     reqKey,
-                respKey:    respKey,
+                rooms:        map[string]map[*Client]struct{}{},
+                rdb:          rdb,
+                sessions:     auth.NewSessionStore(rdb),
+                maxMsgLen:    maxMsgLen,
+                historyLim:   historyLim,
+                ratePerMin:   ratePerMin,
+                reqKey:       reqKey,
+                respKey:      respKey,
+                chatMessages: chatMessages,
+                roomsModel:   roomsModel,
+                usersModel:   usersModel,
         }
 }
 
@@ -190,10 +214,12 @@ func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request) {
         })
 
         c := &Client{
-                conn:  conn,
-                hub:   h,
-                send:  make(chan []byte, defaultSendQueueSize),
-                rooms: map[string]struct{}{},
+                conn:       conn,
+                hub:        h,
+                send:       make(chan []byte, defaultSendQueueSize),
+                rooms:      map[string]struct{}{},
+                mutedRooms: map[string]bool{}, // AUDIT-011
+                ip:         clientIP(r),       // AUDIT-012
         }
         go c.writePump()
         go c.readPump()
@@ -328,8 +354,8 @@ func (c *Client) dispatch(op uint16, body []byte) {
                 c.handleComment(body)
         case OpLike:
                 c.handleLike(body)
-        case OpGift:
-                c.handleGift(body)
+        case OpSessionResume: // AUDIT-009: opcode 1010 — rebind access token.
+                c.handleSessionResume(body)
         default:
                 c.sendError(ErrCodeUnauthorized, fmt.Sprintf("unknown opcode %d", op))
         }
@@ -389,12 +415,35 @@ func (c *Client) handleRoomEnter(body []byte) {
                 c.sendError(ErrCodeNotInChatServer, "invalid room")
                 return
         }
+
+        // AUDIT-011: live-status check. If the room is not currently live, push a
+        // system notice and mark the client as non-speaking for this room (we
+        // still allow the enter so they can watch replays / browse).
+        roomLive := true
+        if c.hub.roomsModel != nil {
+                if room, err := c.hub.roomsModel.FindByRoomNum(context.Background(), b.RoomNum); err == nil && room != nil {
+                        if room.LiveStatus != 1 {
+                                roomLive = false
+                                c.mutedRooms[b.RoomNum] = true
+                                c.sendSystemNotice(b.RoomNum, "未开播直播间不可以发言", 3)
+                        } else {
+                                c.mutedRooms[b.RoomNum] = false
+                        }
+                }
+        }
+
+        // Detect first entry (not already in this room) — used for enter-notice.
+        _, alreadyIn := c.rooms[b.RoomNum]
         // Join the room.
         c.hub.joinRoom(b.RoomNum, c)
         // Ack
         c.sendBinary(OpRoomEnterSuccess, []byte(`{}`))
-        // Broadcast updated viewer count
+        // AUDIT-011: broadcast updated viewer count = RoomSize + DB.VisitCount + FictitiousVisitCount
         c.hub.broadcastViewNum(b.RoomNum)
+        // AUDIT-011: enter-notice for non-guest first entry into a live room.
+        if roomLive && !c.isGuest && !alreadyIn {
+                c.hub.broadcastEnterNotice(b.RoomNum, c.nickName)
+        }
         // Replay history (last 50 messages)
         c.replayHistory(b.RoomNum)
 }
@@ -405,6 +454,8 @@ func (c *Client) handleRoomLeave(body []byte) {
         if b.RoomNum != "" {
                 c.hub.leaveRoom(b.RoomNum, c)
                 c.hub.broadcastViewNum(b.RoomNum)
+                // AUDIT-011: clear any mute flag for this room.
+                delete(c.mutedRooms, b.RoomNum)
         }
         c.sendBinary(OpRoomLeaveSuccess, []byte(`{}`))
 }
@@ -435,6 +486,33 @@ func (c *Client) handleComment(body []byte) {
                 c.sendError(ErrCodeMuted, "guests cannot speak")
                 return
         }
+        // AUDIT-011: clients in non-live rooms are muted at room-enter time.
+        if c.mutedRooms[b.RoomNum] {
+                c.sendError(ErrCodeMuted, "未开播直播间不可以发言")
+                return
+        }
+
+        // AUDIT-012: user-status check — banned users can't comment.
+        if c.hub.usersModel != nil && c.uid > 0 {
+                if u, err := c.hub.usersModel.FindByUid(context.Background(), c.uid); err == nil && u != nil {
+                        if u.Status != 1 {
+                                c.sendError(ErrCodeAccountDisabled, "账号已封禁")
+                                return
+                        }
+                }
+        }
+        // AUDIT-012: IP-ban check (set members of ban:ip:list or black:ip:list).
+        if c.ip != "" && c.hub.rdb != nil {
+                if banned, _ := c.hub.rdb.Sismember("ban:ip:list", c.ip); banned {
+                        c.sendError(ErrCodeMuted, "您的IP已被禁言")
+                        return
+                }
+                if banned, _ := c.hub.rdb.Sismember("black:ip:list", c.ip); banned {
+                        c.sendError(ErrCodeMuted, "您的IP已被禁言")
+                        return
+                }
+        }
+
         content := sanitize(b.Content)
         if content == "" {
                 return
@@ -447,7 +525,8 @@ func (c *Client) handleComment(body []byte) {
                 c.sendError(ErrCodeMuted, "rate limit")
                 return
         }
-        // Sensitive word filter (simple built-in list).
+        // AUDIT-012: sensitive word filter (hardcoded list — production should
+        // load from the block_word table and refresh every 5min).
         if hit, word := matchBlockword(content); hit {
                 logx.Infof("wschat: blocked word %q in %q", word, content)
                 c.sendError(ErrCodeSensitiveWord, "请勿发布敏感内容，多次违规将封号处理")
@@ -458,21 +537,45 @@ func (c *Client) handleComment(body []byte) {
         if msgType == 0 {
                 msgType = 1 // text
         }
-        msgID := genMsgID()
+        now := time.Now().UTC()
+        // AUDIT-010: numeric msgId from Redis INCR (bootstrapped in ServiceContext).
+        var msgID int64
+        if c.hub.rdb != nil {
+                if id, err := c.hub.rdb.Incr("yuyan:chat:message_id"); err == nil {
+                        msgID = id
+                }
+        }
+        if msgID == 0 {
+                // Fallback to a pseudo-unique id when Redis is unavailable.
+                msgID = now.UnixNano()
+        }
         pushBody, _ := json.Marshal(map[string]any{
                 "sendUid":  c.uid,
                 "roomNum":  b.RoomNum,
                 "msgType":  msgType,
-                "sendTime": time.Now().UTC().UnixMilli(),
+                "sendTime": now.UnixMilli(),
                 "content":  content,
                 "sendUser": map[string]any{
                         "uid":      c.uid,
                         "nickName": c.nickName,
                         "icon":     c.icon,
                 },
-                "msgId": msgID,
+                "msgId": msgID, // AUDIT-010: numeric (was random hex string)
         })
-        // Persist to Redis list (LPUSH + LTRIM 0 49).
+        // AUDIT-010: persist to MySQL for durable history.
+        if c.hub.chatMessages != nil {
+                _ = c.hub.chatMessages.Insert(context.Background(), &model.ChatRoomMessage{
+                        ID:       msgID,
+                        SendUID:  c.uid,
+                        RoomNum:  b.RoomNum,
+                        SendTime: now,
+                        Content:  content,
+                        Type:     int32(msgType),
+                        IP:       c.ip,
+                        Status:   1,
+                })
+        }
+        // Persist to Redis list (LPUSH + LTRIM 0 49) for fast recent replay.
         c.hub.persistHistory(b.RoomNum, pushBody)
         // Ack the sender.
         c.sendBinary(OpCommentSuccess, []byte(`{}`))
@@ -500,12 +603,36 @@ func (c *Client) handleLike(body []byte) {
         c.hub.broadcast(b.RoomNum, OpLikeSuccess, push)
 }
 
-func (c *Client) handleGift(body []byte) {
+// AUDIT-009: handleSessionResume handles opcode 1010 — rebinds the connection
+// to a new access token without leaving rooms (M-AUTH-007). The client sends
+// {key: <newAccessToken>} after rotating its session; we update the client's
+// cached identity so subsequent pushes carry the fresh uid/nick/icon.
+//
+// Real gift-sending via WS is NOT implemented — clients use /gift/sendGift HTTP.
+func (c *Client) handleSessionResume(body []byte) {
         if !c.authenticated {
                 c.sendError(ErrCodeUnauthorized, "login required")
                 return
         }
-        c.sendBinary(OpGiftSuccess, []byte(`{}`))
+        var b struct {
+                Key string `json:"key"`
+        }
+        _ = json.Unmarshal(body, &b)
+        if b.Key == "" {
+                c.sendError(ErrCodeUnauthorized, "missing key")
+                return
+        }
+        sess, err := c.hub.sessions.Get(context.Background(), b.Key)
+        if err != nil || sess == nil {
+                c.sendError(ErrCodeUnauthorized, "invalid session")
+                return
+        }
+        c.uid = sess.UID
+        c.nickName = sess.NickName
+        c.icon = sess.Icon
+        c.isGuest = sess.IsGuest
+        c.authenticated = true
+        c.sendBinary(OpSessionResumeSuccess, []byte(`{}`))
 }
 
 // =============================================================
@@ -597,16 +724,58 @@ func (h *Hub) broadcast(room string, op uint16, body []byte) {
         }
 }
 
+// RoomSize returns the number of clients currently in the named room.
+// AUDIT-011.
+func (h *Hub) RoomSize(room string) int64 {
+        h.mu.RLock()
+        defer h.mu.RUnlock()
+        return int64(len(h.rooms[room]))
+}
+
 // broadcastViewNum pushes 3005 {roomNum, viewNum} to all room members.
+// AUDIT-011: viewNum = currentWSAudience + DB.VisitCount + DB.FictitiousVisitCount.
 func (h *Hub) broadcastViewNum(room string) {
         h.mu.RLock()
         viewNum := int64(len(h.rooms[room]))
         h.mu.RUnlock()
+        // Add persisted visit counts from the DB (best-effort).
+        if h.roomsModel != nil {
+                if r, err := h.roomsModel.FindByRoomNum(context.Background(), room); err == nil && r != nil {
+                        viewNum += r.VisitCount + r.FictitiousVisitCount
+                }
+        }
         body, _ := json.Marshal(map[string]any{
                 "roomNum": room,
                 "viewNum": viewNum,
         })
         h.broadcast(room, OpViewNumPush, body)
+}
+
+// broadcastEnterNotice pushes a 3000 system notice "{nickName}进入直播间" to
+// all clients in the room. AUDIT-011.
+func (h *Hub) broadcastEnterNotice(room, nickName string) {
+        body, _ := json.Marshal(map[string]any{
+                "roomNum":    room,
+                "msgType":    3, // system
+                "noticeType": 2, // enter
+                "content":    nickName + "进入直播间",
+                "sendTime":   time.Now().UTC().UnixMilli(),
+        })
+        h.broadcast(room, OpCommentPush, body)
+}
+
+// sendSystemNotice pushes a 3000 system notice to the single client (the
+// just-joined viewer). Used by handleRoomEnter for "未开播直播间不可以发言".
+// AUDIT-011.
+func (c *Client) sendSystemNotice(room, content string, msgType int) {
+        body, _ := json.Marshal(map[string]any{
+                "roomNum":    room,
+                "msgType":    msgType,
+                "noticeType": 1, // system notice
+                "content":    content,
+                "sendTime":   time.Now().UTC().UnixMilli(),
+        })
+        c.sendBinary(OpCommentPush, body)
 }
 
 // persistHistory appends the message JSON to the room's Redis LIST.
@@ -621,18 +790,45 @@ func (h *Hub) persistHistory(room string, body []byte) {
 }
 
 // replayHistory sends the last N messages as 3000 frames to the client.
+// AUDIT-010: try Redis LIST first; on empty/miss fall back to MySQL
+// (chat_room_message) so a flushed Redis doesn't lose all history.
 func (c *Client) replayHistory(room string) {
-        if c.hub.rdb == nil {
+        if c.hub.rdb != nil {
+                key := chatHistoryKeyPrefix + room
+                vals, err := c.hub.rdb.Lrange(key, 0, c.hub.historyLim)
+                if err == nil && len(vals) > 0 {
+                        // Redis LIST is LPUSH newest-first → reverse for chronological replay.
+                        for i := len(vals) - 1; i >= 0; i-- {
+                                frame := encodeBinaryFrame(OpCommentPush, []byte(vals[i]), c.hub.respKey)
+                                select {
+                                case c.send <- frame:
+                                default:
+                                        return
+                                }
+                        }
+                        return
+                }
+        }
+        // Fall back to MySQL.
+        if c.hub.chatMessages == nil {
                 return
         }
-        key := chatHistoryKeyPrefix + room
-        vals, err := c.hub.rdb.Lrange(key, 0, c.hub.historyLim)
-        if err != nil {
+        msgs, err := c.hub.chatMessages.ListRecentByRoom(context.Background(), room, c.hub.historyLim)
+        if err != nil || len(msgs) == 0 {
                 return
         }
-        // Redis LIST is LPUSH newest-first → reverse for chronological replay.
-        for i := len(vals) - 1; i >= 0; i-- {
-                frame := encodeBinaryFrame(OpCommentPush, []byte(vals[i]), c.hub.respKey)
+        // ListRecentByRoom returns newest-first → reverse for chronological replay.
+        for i := len(msgs) - 1; i >= 0; i-- {
+                m := msgs[i]
+                pushBody, _ := json.Marshal(map[string]any{
+                        "sendUid":  m.SendUID,
+                        "roomNum":  m.RoomNum,
+                        "msgType":  int(m.Type),
+                        "sendTime": m.SendTime.UnixMilli(),
+                        "content":  m.Content,
+                        "msgId":    m.ID,
+                })
+                frame := encodeBinaryFrame(OpCommentPush, pushBody, c.hub.respKey)
                 select {
                 case c.send <- frame:
                 default:
@@ -704,10 +900,36 @@ func encodeBinaryFrame(op uint16, body, key []byte) []byte {
 // Misc helpers
 // =============================================================
 
+// genMsgID returns a random 24-hex-char id. Kept for backward compatibility
+// with older clients that may have received hex msgIds; the comment path now
+// uses a numeric Redis INCR id (AUDIT-010).
 func genMsgID() string {
         b := make([]byte, 12)
         _, _ = rand.Read(b)
         return hex.EncodeToString(b)
+}
+
+// clientIP extracts the client IP from X-Forwarded-For / X-Real-IP /
+// RemoteAddr. AUDIT-012.
+func clientIP(r *http.Request) string {
+        if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+                for i := 0; i < len(xff); i++ {
+                        if xff[i] == ',' {
+                                return strings.TrimSpace(xff[:i])
+                        }
+                }
+                return strings.TrimSpace(xff)
+        }
+        if xri := r.Header.Get("X-Real-IP"); xri != "" {
+                return strings.TrimSpace(xri)
+        }
+        host := r.RemoteAddr
+        for i := len(host) - 1; i >= 0; i-- {
+                if host[i] == ':' {
+                        return host[:i]
+                }
+        }
+        return host
 }
 
 // isSafeRoom allows only alphanumeric room ids.

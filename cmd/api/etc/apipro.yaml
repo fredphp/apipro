@@ -20,6 +20,16 @@ Redis:
   Type: node
 
 # ============================================================
+# Database for WS chat persistence + room/user lookups
+# (AUDIT-010/011/012). When DataSource is empty, the WS hub runs in
+# Redis-only mode (no MySQL persistence, no live-status check).
+# ============================================================
+DBDriver: mysql
+DataSource: root:123456@tcp(127.0.0.1:3306)/apipro?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
+# DBDriver: sqlite
+# DataSource: ./data/apipro.db
+
+# ============================================================
 # Transport encryption (must match RPC)
 # ============================================================
 ApiKeyReq: "PHp1st5vEg5Ca8FH"

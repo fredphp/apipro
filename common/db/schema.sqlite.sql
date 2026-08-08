@@ -202,9 +202,9 @@ INSERT OR IGNORE INTO live_hot_recommend (room_num,room_json,sort_order,status,b
  ('1002', '[{"uid":1002,"roomNum":"1002","nickName":"NBA Boy","sort":2}]',   2, 1, strftime('%Y-%m-%d %H:%M:%S','now','-1 day'), strftime('%Y-%m-%d %H:%M:%S','now','+30 day'));
 
 INSERT OR IGNORE INTO room_gift_rank (room_num,uid,nick_name,icon,score,rank_no) VALUES
- ('1001', 5001, 'Fan01', 'https://sta.ncctrials.com/file/u/5001.png', 18820, 1),
- ('1001', 5002, 'Fan02', 'https://sta.ncctrials.com/file/u/5002.png', 12330, 2),
- ('1002', 6001, 'Fan03', 'https://sta.ncctrials.com/file/u/6001.png', 22110, 1);
+ ('1001', 5001, 'demo_user', 'https://sta.ncctrials.com/file/avatar/demo.png', 18820, 1),
+ ('1001', 1001, 'Cá Mực FM', 'https://sta.ncctrials.com/file/avatar/a1001.png', 12330, 2),
+ ('1002', 1002, 'NBA Boy',   'https://sta.ncctrials.com/file/avatar/a1002.png', 22110, 1);
 
 -- Demo audience user — same as MySQL schema:
 --   phone: 13800138888, country_code: 86, plain password: qwe123

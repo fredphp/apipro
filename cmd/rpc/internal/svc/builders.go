@@ -267,9 +267,10 @@ func GroupCatalogRows(rows []model.MatchCatalogRow) []MatchCatalogItem {
                 }
                 if r.AnchorUID > 0 {
                         it.Anchors = append(it.Anchors, MatchAnchorItem{
-                                UID:      r.AnchorUID,
-                                NickName: r.AnchorNickName,
-                                Icon:     r.AnchorIcon,
+                                UID:        r.AnchorUID,
+                                NickName:   r.AnchorNickName,
+                                Icon:       r.AnchorIcon,
+                                CutOutIcon: r.AnchorIcon, // AUDIT-019: fallback to anchor icon
                                 Anchor: MatchAnchorProfile{
                                         RoomNum: r.RoomNum,
                                         Detail:  r.RoomDetail,
@@ -316,6 +317,8 @@ func BuildAllLiveRooms(ctx context.Context, m *Models) map[string]any {
 func RoomsToResults(rooms []model.LiveRoom) []RoomResult {
         out := make([]RoomResult, 0, len(rooms))
         for _, r := range rooms {
+                // AUDIT-019: cutOutIcon fallback to anchor icon (no separate column).
+                cutOut := r.AnchorIcon
                 out = append(out, RoomResult{
                         RoomNum:              r.RoomNum,
                         Title:                r.Title,
@@ -327,11 +330,12 @@ func RoomsToResults(rooms []model.LiveRoom) []RoomResult {
                         ViewCount:            r.VisitCount + r.FictitiousVisitCount,
                         FocusCount:           r.FocusCount + r.FictitiousFocusCount,
                         Anchor: AnchorResult{
-                                UID:      r.UID,
-                                NickName: r.AnchorNickName,
-                                Icon:     r.AnchorIcon,
-                                RoomNum:  r.RoomNum,
-                                Notice:   r.Notice,
+                                UID:        r.UID,
+                                NickName:   r.AnchorNickName,
+                                Icon:       r.AnchorIcon,
+                                CutOutIcon: cutOut,
+                                RoomNum:    r.RoomNum,
+                                Notice:     r.Notice,
                         },
                 })
         }
@@ -372,11 +376,12 @@ func BuildRoomDetail(ctx context.Context, m *Models, roomNum string) map[string]
                 ViewCount:  r.VisitCount + r.FictitiousVisitCount,
                 FocusCount: r.FocusCount + r.FictitiousFocusCount,
                 Anchor: AnchorResult{
-                        UID:      r.UID,
-                        NickName: r.AnchorNickName,
-                        Icon:     r.AnchorIcon,
-                        RoomNum:  r.RoomNum,
-                        Notice:   r.Notice,
+                        UID:        r.UID,
+                        NickName:   r.AnchorNickName,
+                        Icon:       r.AnchorIcon,
+                        CutOutIcon: r.AnchorIcon, // AUDIT-019: fallback to anchor icon
+                        RoomNum:    r.RoomNum,
+                        Notice:     r.Notice,
                 },
         }
         if r.AssistantUID > 0 {

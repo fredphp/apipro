@@ -17,6 +17,11 @@ type Config struct {
         // Redis for rate limit + chat history + session store
         Redis redis.RedisConf
 
+        // Database for WS chat persistence + room/user lookups (AUDIT-010/011/012).
+        // Optional — when empty, the WS hub degrades to Redis-only mode.
+        DBDriver   string `json:",default=mysql"`
+        DataSource string `json:",optional"`
+
         // Transport encryption keys — same as RPC.
         ApiKeyReq  string `json:",optional"`
         ApiKeyResp string `json:",optional"`

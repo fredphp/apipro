@@ -16,6 +16,7 @@ import (
 
         "github.com/zeromicro/go-zero/core/logx"
         "github.com/zeromicro/go-zero/core/stores/redis"
+        "golang.org/x/sync/singleflight"
 )
 
 var ErrCacheUnavailable = errors.New("cache unavailable")
@@ -64,6 +65,9 @@ func (s *Stats) Snapshot() (hits, misses map[string]int64) {
 type Cache struct {
         rdb   *redis.Redis
         stats *Stats
+        // group coalesces concurrent cache-miss loads for the same key
+        // (singleflight). AUDIT-013.
+        group singleflight.Group
 }
 
 // New creates a cache wrapping a go-zero redis instance.
@@ -78,6 +82,8 @@ func (c *Cache) Rdb() *redis.Redis { return c.rdb }
 func (c *Cache) Stats() *Stats { return c.stats }
 
 // GetOrLoad reads JSON value from Redis; on miss calls loader, stores with TTL, returns.
+// Concurrent misses for the same key are coalesced via singleflight (AUDIT-013)
+// so a cache stampede on a hot key fires at most one loader invocation at a time.
 func GetOrLoad[T any](ctx context.Context, c *Cache, family, key string, ttl time.Duration, loader func() (T, error)) (T, error) {
         var zero T
         if c == nil || c.rdb == nil {
@@ -96,20 +102,37 @@ func GetOrLoad[T any](ctx context.Context, c *Cache, family, key string, ttl tim
                 logx.Errorf("cache get error family=%s key=%s: %v", family, key, err)
         }
         c.stats.Miss(family)
-        v, lerr := loader()
+        // singleflight coalesces concurrent loads on the same key — only the
+        // first caller runs the loader; the rest receive the same result.
+        v, lerr, _ := c.group.Do(redisKey, func() (interface{}, error) {
+                // Re-check cache inside the single-flight leader (another goroutine
+                // may have just populated it).
+                if raw, err := c.rdb.Get(redisKey); err == nil && raw != "" {
+                        var v T
+                        if jerr := json.Unmarshal([]byte(raw), &v); jerr == nil {
+                                return v, nil
+                        }
+                }
+                loaded, lerr := loader()
+                if lerr != nil {
+                        return nil, lerr
+                }
+                go func() {
+                        b, jerr := json.Marshal(loaded)
+                        if jerr != nil {
+                                return
+                        }
+                        if serr := c.rdb.Setex(redisKey, string(b), int(ttl.Seconds())); serr != nil {
+                                logx.Errorf("cache set error family=%s key=%s: %v", family, key, serr)
+                        }
+                }()
+                return loaded, nil
+        })
         if lerr != nil {
                 return zero, lerr
         }
-        go func() {
-                b, jerr := json.Marshal(v)
-                if jerr != nil {
-                        return
-                }
-                if serr := c.rdb.Setex(redisKey, string(b), int(ttl.Seconds())); serr != nil {
-                        logx.Errorf("cache set error family=%s key=%s: %v", family, key, serr)
-                }
-        }()
-        return v, nil
+        loaded, _ := v.(T)
+        return loaded, nil
 }
 
 // Refresh forces a reload (bypass cache read) and writes back.

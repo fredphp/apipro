@@ -6,13 +6,17 @@ import (
         "errors"
         "fmt"
         "net/http"
+        "regexp"
         "strconv"
         "strings"
         "time"
+        "unicode/utf8"
 
         "apipro/cmd/rpc/internal/svc"
         "apipro/common/auth"
+        "apipro/common/cache"
         "apipro/common/model"
+        "apipro/common/ratelimit"
         "apipro/desc/proto/gen/apipro"
 
         "github.com/zeromicro/go-zero/core/logx"
@@ -90,8 +94,10 @@ func (l *CallLogic) Call(in *apipro.CallReq) (*apipro.CallResp, error) {
         // ---- live ----
         case "live_all_rooms": // all_live_rooms.json payload
                 result, code, meg = l.handleAllLiveRooms()
-        case "live_types": // live_types.json payload
+        case "live_types": // live_types.json payload (top-level live type catalog)
                 result, code, meg = l.handleLiveTypes()
+        case "live_cateList": // AUDIT-001: /live/cateList — rooms filtered by liveTypeId
+                result, code, meg = l.handleLiveCateList(in)
         case "live_hot": // encrypted /live/hot
                 result, code, meg = l.handleLiveHot()
         case "live_detail":
@@ -193,6 +199,23 @@ func (l *CallLogic) handleLogin(in *apipro.CallReq) (json.RawMessage, int, strin
         }
         // Normalize country code (strip +)
         cc := normalizeCC(req.CountryCode)
+
+        // AUDIT-003: phone format validation.
+        if !validatePhone(cc, req.Phone) {
+                return nil, CodePhoneInvalid, "手机号码格式错误"
+        }
+        // AUDIT-003: per-(cc,phone) rate limit — 10/min.
+        rdb := l.svcCtx.Redis
+        loginLimiter := ratelimit.New(rdb, 10, "yuyan:ratelimit:login")
+        if !loginLimiter.Allow(l.ctx, cc+":"+req.Phone) {
+                return nil, CodeRateLimited, "操作过于频繁，请稍后再试"
+        }
+        // AUDIT-003: fail-lockout check — if a lock key exists, refuse.
+        lockKey := "yuyan:login:lock:" + cc + ":" + req.Phone
+        if locked, _ := rdb.Get(lockKey); locked != "" {
+                return nil, CodeLoginLocked, "账号已锁定，请30分钟后再试"
+        }
+
         u, err := l.svcCtx.Models.Users.FindByPhone(l.ctx, cc, req.Phone)
         if err != nil {
                 if errors.Is(err, model.ErrNotFound) {
@@ -202,15 +225,19 @@ func (l *CallLogic) handleLogin(in *apipro.CallReq) (json.RawMessage, int, strin
         }
         // Verify password
         if u.PwdType != auth.PwdTypeMD5 {
+                l.recordLoginFail(cc, req.Phone)
                 return nil, CodePasswordWrong, "密码错误"
         }
         if !auth.VerifyPassword(req.Password, u.Password, u.Salt) {
+                l.recordLoginFail(cc, req.Phone)
                 return nil, CodePasswordWrong, "密码错误"
         }
         // Check status
         if u.Status != 1 {
                 return nil, CodeUserBanned, "账号已封禁"
         }
+        // AUDIT-003: clear fail counter on success.
+        _, _ = rdb.Del("yuyan:login:fail:" + cc + ":" + req.Phone)
         // Issue session
         sess, err := l.svcCtx.Sessions.IssueUser(l.ctx, u.UID, u.NickName, u.Icon, int(u.UserType), req.Plat)
         if err != nil {
@@ -218,6 +245,30 @@ func (l *CallLogic) handleLogin(in *apipro.CallReq) (json.RawMessage, int, strin
         }
         resp := l.buildAuthResponse(sess, u)
         return jsonBytes(resp), CodeOK, ""
+}
+
+// recordLoginFail increments the per-(cc,phone) fail counter. After 10 fails
+// within 15min, a 30min lock is set and the counter is cleared.
+// AUDIT-003.
+func (l *CallLogic) recordLoginFail(cc, phone string) {
+        rdb := l.svcCtx.Redis
+        if rdb == nil {
+                return
+        }
+        failKey := "yuyan:login:fail:" + cc + ":" + phone
+        lockKey := "yuyan:login:lock:" + cc + ":" + phone
+        cnt, err := rdb.Incr(failKey)
+        if err != nil {
+                return
+        }
+        // Set 15min TTL on first fail (best-effort; Idempotent on subsequent fails).
+        if cnt == 1 {
+                _ = rdb.Expire(failKey, 15*60)
+        }
+        if cnt >= 10 {
+                _ = rdb.Setex(lockKey, "1", 30*60)
+                _, _ = rdb.Del(failKey)
+        }
 }
 
 func (l *CallLogic) handleRegister(in *apipro.CallReq) (json.RawMessage, int, string) {
@@ -228,17 +279,32 @@ func (l *CallLogic) handleRegister(in *apipro.CallReq) (json.RawMessage, int, st
         if req.AccountType != 1 || req.Phone == "" || req.NickName == "" || req.PwdType != auth.PwdTypeMD5 {
                 return nil, CodeBusinessError, "注册失败"
         }
+        // AUDIT-005: nickname length check (>= 2 runes).
+        if utf8.RuneCountInString(req.NickName) < 2 {
+                return nil, CodeBusinessError, "昵称至少2个字符"
+        }
         cc := normalizeCC(req.CountryCode)
+        // AUDIT-003: phone format validation.
+        if !validatePhone(cc, req.Phone) {
+                return nil, CodePhoneInvalid, "手机号码格式错误"
+        }
         // Check SMS code (type=1 for register)
         if !l.svcCtx.SmsStore.Verify(l.ctx, cc, req.Phone, 1, req.SmsCode) {
                 return nil, CodeSmsCheckFailed, "验证码错误"
+        }
+        // AUDIT-005: verify kaptcha (image captcha) — one-shot.
+        kaptchaKey := "yuyan:kaptcha:" + req.Phone
+        storedKaptcha, _ := l.svcCtx.Cache.Rdb().Get(kaptchaKey)
+        _, _ = l.svcCtx.Cache.Rdb().Del(kaptchaKey)
+        if !strings.EqualFold(strings.TrimSpace(storedKaptcha), strings.TrimSpace(req.Kaptcha)) {
+                return nil, CodeKaptchaInvalid, "图形验证码错误"
         }
         // Check phone not already registered
         if existing, err := l.svcCtx.Models.Users.FindByPhone(l.ctx, cc, req.Phone); err == nil && existing != nil {
                 return nil, CodePhoneAlreadyReg, "手机号码已被注册"
         }
-        // Allocate UID
-        uid, err := l.svcCtx.Models.Users.NextUID(l.ctx)
+        // AUDIT-008: allocate UID atomically via Redis INCR (avoids race).
+        uid, err := l.svcCtx.AllocUID(l.ctx)
         if err != nil {
                 return nil, CodeBusinessError, "uid alloc: " + err.Error()
         }
@@ -263,8 +329,11 @@ func (l *CallLogic) handleRegister(in *apipro.CallReq) (json.RawMessage, int, st
                 Plat:        int32(req.Plat),
         }
         if err := l.svcCtx.Models.Users.Insert(l.ctx, u); err != nil {
+                // AUDIT-008: PK violation on uid is a race / counter collision, NOT a
+                // phone duplication — return a generic error so the user retries.
                 if errors.Is(err, model.ErrDuplicate) {
-                        return nil, CodePhoneAlreadyReg, "手机号码已被注册"
+                        logx.Errorf("register: uid collision uid=%d (retry recommended)", uid)
+                        return nil, CodeBusinessError, "注册失败请重试"
                 }
                 return nil, CodeBusinessError, "insert: " + err.Error()
         }
@@ -295,6 +364,9 @@ func (l *CallLogic) handleGuestLogin(in *apipro.CallReq) (json.RawMessage, int, 
                         UID:      0,
                         NickName: sess.NickName,
                         Gender:   3, // "other" per backend-zero
+                        // AUDIT-007: guest tier is "audience" (1) — clients gating on
+                        // userType==1 must accept guest sessions.
+                        UserType: 1,
                 },
         }
         return jsonBytes(resp), CodeOK, ""
@@ -368,6 +440,34 @@ func (l *CallLogic) handleSmsGetCode(in *apipro.CallReq) (json.RawMessage, int, 
         if req.Type == 0 {
                 req.Type = 1
         }
+        // AUDIT-003: phone format validation.
+        if !validatePhone(cc, req.Phone) {
+                return nil, CodePhoneInvalid, "手机号码格式错误"
+        }
+        rdb := l.svcCtx.Redis
+        if rdb != nil {
+                // AUDIT-004: 60s cooldown per (cc,phone) — SETNXEX returns false if key exists.
+                cooldownKey := "yuyan:ratelimit:cooldown:sms:" + cc + ":" + req.Phone
+                ok, _ := rdb.SetnxEx(cooldownKey, "1", 60)
+                if !ok {
+                        return nil, CodeRateLimited, "验证码发送过频，请60秒后再试"
+                }
+                // AUDIT-004: hourly limit — INCR with 1h TTL, max 10/hour.
+                hourKey := "yuyan:ratelimit:sms:" + cc + ":" + req.Phone + ":hour"
+                cnt, err := rdb.Incr(hourKey)
+                if err == nil && cnt == 1 {
+                        _ = rdb.Expire(hourKey, 3600)
+                }
+                if cnt > 10 {
+                        return nil, CodeRateLimited, "验证码发送次数已达上限"
+                }
+        }
+        // AUDIT-004: register guard — if type=1 and phone already registered, refuse.
+        if req.Type == 1 {
+                if existing, err := l.svcCtx.Models.Users.FindByPhone(l.ctx, cc, req.Phone); err == nil && existing != nil {
+                        return nil, CodePhoneAlreadyReg, "手机号码已被注册"
+                }
+        }
         _, err := l.svcCtx.SmsStore.Issue(l.ctx, cc, req.Phone, req.Type)
         if err != nil {
                 return nil, CodeBusinessError, "sms issue: " + err.Error()
@@ -414,30 +514,59 @@ func (l *CallLogic) handleMatchDetail(in *apipro.CallReq) (json.RawMessage, int,
         if req.ScheduleID == 0 {
                 return nil, CodeBusinessError, "missing scheduleId"
         }
+        // AUDIT-014: cache the (match, rooms) payload for 60s.
+        cacheKey := "detail:" + strconv.FormatInt(req.ScheduleID, 10)
+        out, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", cacheKey, 60*time.Second, func() (map[string]any, error) {
+                return l.buildMatchDetailPayload(req.ScheduleID)
+        })
+        if err != nil {
+                return nil, CodeBusinessError, err.Error()
+        }
+        if out == nil {
+                return nil, CodeBusinessError, "match not found"
+        }
+        return jsonBytes(out), CodeOK, ""
+}
+
+// buildMatchDetailPayload fetches the catalog row + linked rooms for a
+// schedule and returns the {match, rooms} payload. Returns nil map (with nil
+// error) if the schedule is not found.
+func (l *CallLogic) buildMatchDetailPayload(scheduleID int64) (map[string]any, error) {
         // Fetch the catalog row + anchors
         rows, err := l.svcCtx.Models.Matches.ListCatalog(l.ctx, []int64{1, 2, 5}, 200)
         if err != nil {
-                return nil, CodeBusinessError, err.Error()
+                return nil, err
         }
         var found *svc.MatchCatalogItem
         items := groupCatalogRowsPublic(rows)
         for i := range items {
-                if items[i].ScheduleID == req.ScheduleID {
+                if items[i].ScheduleID == scheduleID {
                         found = &items[i]
                         break
                 }
         }
         if found == nil {
-                return nil, CodeBusinessError, "match not found"
+                return nil, nil
         }
-        // Fetch linked rooms
-        rooms, _ := l.svcCtx.Models.Rooms.ListAllVisible(l.ctx, 200)
+        // AUDIT-006: fetch only the rooms LINKED to this schedule (not all rooms).
+        rooms, _ := l.svcCtx.Models.Matches.ListRoomsBySchedule(l.ctx, scheduleID, 50)
         roomResults := roomsToResultsPublic(rooms)
-        resp := map[string]any{
-                "match": *found,
-                "rooms": roomResults,
+        // AUDIT-023: the "match" field uses the simpler MatchItem struct (8
+        // fields) rather than the MatchCatalogItem superset — matches backend-zero.
+        matchItem := svc.MatchItem{
+                ScheduleID:   found.ScheduleID,
+                MatchTime:    found.MatchTime,
+                HostName:     found.HostName,
+                GuestName:    found.GuestName,
+                HostIcon:     found.HostIcon,
+                GuestIcon:    found.GuestIcon,
+                SubCateName:  found.SubCateName,
+                CategoryIcon: found.CategoryIcon,
         }
-        return jsonBytes(resp), CodeOK, ""
+        return map[string]any{
+                "match": matchItem,
+                "rooms": roomResults,
+        }, nil
 }
 
 func (l *CallLogic) handleMatchByDate(in *apipro.CallReq) (json.RawMessage, int, string) {
@@ -464,12 +593,38 @@ func (l *CallLogic) handleAllLiveRooms() (json.RawMessage, int, string) {
 }
 
 func (l *CallLogic) handleLiveTypes() (json.RawMessage, int, string) {
-        lts, err := l.svcCtx.Models.LiveTypes.ListTopLevel(l.ctx)
+        // AUDIT-014: cache live types for 15s.
+        out, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "live", "types", 15*time.Second, func() ([]svc.LiveTypeJSON, error) {
+                lts, err := l.svcCtx.Models.LiveTypes.ListTopLevel(l.ctx)
+                if err != nil {
+                        return nil, err
+                }
+                return svc.BuildLiveTypesJSON(lts), nil
+        })
         if err != nil {
                 return nil, CodeBusinessError, err.Error()
         }
-        out := svc.BuildLiveTypesJSON(lts)
         return jsonBytes(out), CodeOK, ""
+}
+
+// AUDIT-001: /live/cateList dispatches here. Returns rooms filtered by
+// liveTypeId (top-level parent), same shape as ListByType.
+func (l *CallLogic) handleLiveCateList(in *apipro.CallReq) (json.RawMessage, int, string) {
+        var req struct {
+                LiveTypeID int64 `json:"liveTypeId"`
+        }
+        _ = json.Unmarshal([]byte(in.ParamJson), &req)
+        if req.LiveTypeID == 0 {
+                return nil, CodeBusinessError, "missing liveTypeId"
+        }
+        rooms, err := l.svcCtx.Models.Rooms.ListByType(l.ctx, req.LiveTypeID, 50)
+        if err != nil {
+                return nil, CodeBusinessError, err.Error()
+        }
+        resp := map[string]any{
+                "rooms": svc.RoomsToResults(rooms),
+        }
+        return jsonBytes(resp), CodeOK, ""
 }
 
 func (l *CallLogic) handleLiveHot() (json.RawMessage, int, string) {
@@ -508,11 +663,21 @@ func (l *CallLogic) handleRoomDetail(in *apipro.CallReq) (json.RawMessage, int, 
         if req.RoomNum == "" {
                 return nil, CodeBusinessError, "missing roomNum"
         }
-        detail := svc.BuildRoomDetail(l.ctx, l.svcCtx.Models, req.RoomNum)
-        if detail == nil {
+        // AUDIT-014: cache room detail for 30s.
+        out, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "room", "detail:"+req.RoomNum, 30*time.Second, func() (map[string]any, error) {
+                detail := svc.BuildRoomDetail(l.ctx, l.svcCtx.Models, req.RoomNum)
+                if detail == nil {
+                        return nil, nil
+                }
+                return detail, nil
+        })
+        if err != nil {
+                return nil, CodeBusinessError, err.Error()
+        }
+        if out == nil {
                 return nil, CodeBusinessError, "room not found"
         }
-        return jsonBytes(detail), CodeOK, ""
+        return jsonBytes(out), CodeOK, ""
 }
 
 func (l *CallLogic) handleRoomSchedule(in *apipro.CallReq) (json.RawMessage, int, string) {
@@ -523,7 +688,13 @@ func (l *CallLogic) handleRoomSchedule(in *apipro.CallReq) (json.RawMessage, int
         if req.RoomNum == "" {
                 return nil, CodeBusinessError, "missing roomNum"
         }
-        out := svc.BuildRoomSchedule(l.ctx, l.svcCtx.Models, req.RoomNum)
+        // AUDIT-014: cache room schedule for 60s.
+        out, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "room", "schedule:"+req.RoomNum, 60*time.Second, func() (map[string][]svc.MatchItem, error) {
+                return svc.BuildRoomSchedule(l.ctx, l.svcCtx.Models, req.RoomNum), nil
+        })
+        if err != nil {
+                return nil, CodeBusinessError, err.Error()
+        }
         return jsonBytes(out), CodeOK, ""
 }
 
@@ -535,7 +706,13 @@ func (l *CallLogic) handleRoomGiftRank(in *apipro.CallReq) (json.RawMessage, int
         if req.RoomNum == "" {
                 return nil, CodeBusinessError, "missing roomNum"
         }
-        out := svc.BuildGiftRank(l.ctx, l.svcCtx.Models, req.RoomNum)
+        // AUDIT-014: cache gift rank for 30s.
+        out, err := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "room", "gift_rank:"+req.RoomNum, 30*time.Second, func() ([]svc.GiftRankItem, error) {
+                return svc.BuildGiftRank(l.ctx, l.svcCtx.Models, req.RoomNum), nil
+        })
+        if err != nil {
+                return nil, CodeBusinessError, err.Error()
+        }
         return jsonBytes(out), CodeOK, ""
 }
 
@@ -558,56 +735,31 @@ func (l *CallLogic) buildAuthResponse(sess *auth.Session, u *model.User) svc.Aut
 }
 
 func (l *CallLogic) loadMatchCatalog() map[string][]svc.MatchCatalogItem {
-        // Try cache first
-        if cached, err := l.svcCtx.Cache.Rdb().Get("apipro:match:catalog"); err == nil && cached != "" {
-                var out map[string][]svc.MatchCatalogItem
-                if json.Unmarshal([]byte(cached), &out) == nil {
-                        return out
-                }
-        }
-        out := svc.BuildMatchCatalog(l.ctx, l.svcCtx.Models)
-        b, _ := json.Marshal(out)
-        _ = l.svcCtx.Cache.Rdb().Setex("apipro:match:catalog", string(b), 60)
+        // AUDIT-013: use cache.GetOrLoad (singleflight + stats) instead of raw Get.
+        out, _ := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", "catalog", 60*time.Second, func() (map[string][]svc.MatchCatalogItem, error) {
+                return svc.BuildMatchCatalog(l.ctx, l.svcCtx.Models), nil
+        })
         return out
 }
 
 func (l *CallLogic) loadRecommend() []svc.MatchCatalogItem {
-        if cached, err := l.svcCtx.Cache.Rdb().Get("apipro:match:recommend"); err == nil && cached != "" {
-                var out []svc.MatchCatalogItem
-                if json.Unmarshal([]byte(cached), &out) == nil {
-                        return out
-                }
-        }
-        out := svc.BuildRecommend(l.ctx, l.svcCtx.Models)
-        b, _ := json.Marshal(out)
-        _ = l.svcCtx.Cache.Rdb().Setex("apipro:match:recommend", string(b), 60)
+        out, _ := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", "recommend", 60*time.Second, func() ([]svc.MatchCatalogItem, error) {
+                return svc.BuildRecommend(l.ctx, l.svcCtx.Models), nil
+        })
         return out
 }
 
 func (l *CallLogic) loadMatchByDate(date string) []svc.MatchCatalogItem {
-        key := "apipro:match:date:" + date
-        if cached, err := l.svcCtx.Cache.Rdb().Get(key); err == nil && cached != "" {
-                var out []svc.MatchCatalogItem
-                if json.Unmarshal([]byte(cached), &out) == nil {
-                        return out
-                }
-        }
-        out := svc.BuildMatchByDate(l.ctx, l.svcCtx.Models, date)
-        b, _ := json.Marshal(out)
-        _ = l.svcCtx.Cache.Rdb().Setex(key, string(b), 60)
+        out, _ := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "match", "date:"+date, 60*time.Second, func() ([]svc.MatchCatalogItem, error) {
+                return svc.BuildMatchByDate(l.ctx, l.svcCtx.Models, date), nil
+        })
         return out
 }
 
 func (l *CallLogic) loadAllLiveRooms() map[string]any {
-        if cached, err := l.svcCtx.Cache.Rdb().Get("apipro:live:all"); err == nil && cached != "" {
-                var out map[string]any
-                if json.Unmarshal([]byte(cached), &out) == nil {
-                        return out
-                }
-        }
-        out := svc.BuildAllLiveRooms(l.ctx, l.svcCtx.Models)
-        b, _ := json.Marshal(out)
-        _ = l.svcCtx.Cache.Rdb().Setex("apipro:live:all", string(b), 15)
+        out, _ := cache.GetOrLoad(l.ctx, l.svcCtx.Cache, "live", "all", 15*time.Second, func() (map[string]any, error) {
+                return svc.BuildAllLiveRooms(l.ctx, l.svcCtx.Models), nil
+        })
         return out
 }
 
@@ -625,6 +777,48 @@ func normalizeCC(cc string) string {
         cc = strings.TrimSpace(cc)
         cc = strings.TrimPrefix(cc, "+")
         return cc
+}
+
+// vnPhoneRe matches Vietnam mobile numbers (9 digits, first digit in [35789]).
+var vnPhoneRe = regexp.MustCompile(`^[35789][0-9]{8}$`)
+
+// validatePhone checks phone format per country code (AUDIT-003).
+//   - "86" / "+86": 11 digits starting with 1 (China mobile)
+//   - "84" / "+84": 9 digits starting with [35789] (Vietnam mobile)
+//   - other: at least 5 digits
+func validatePhone(cc, phone string) bool {
+        phone = strings.TrimSpace(phone)
+        cc = normalizeCC(cc)
+        if phone == "" {
+                return false
+        }
+        switch cc {
+        case "86":
+                // China mobile: 11 digits, starts with 1.
+                if len(phone) != 11 || phone[0] != '1' {
+                        return false
+                }
+                for i := 0; i < len(phone); i++ {
+                        if phone[i] < '0' || phone[i] > '9' {
+                                return false
+                        }
+                }
+                return true
+        case "84":
+                // Vietnam mobile: 9 digits, starts with [35789].
+                return vnPhoneRe.MatchString(phone)
+        default:
+                // Generic: at least 5 digits.
+                if len(phone) < 5 {
+                        return false
+                }
+                for i := 0; i < len(phone); i++ {
+                        if phone[i] < '0' || phone[i] > '9' {
+                                return false
+                        }
+                }
+                return true
+        }
 }
 
 // jsonBytes marshals v, returning nil on error (never panics).

@@ -189,6 +189,31 @@ func (m *MatchModel) ListByRoom(ctx context.Context, roomNum string, limit int) 
         return scanCatalogRows(rows)
 }
 
+// ListRoomsBySchedule returns the live rooms linked to a schedule (for
+// /match/detail "rooms" field). Mirrors ListByType/ListHot column shape so
+// scanLiveRooms works unchanged.
+func (m *MatchModel) ListRoomsBySchedule(ctx context.Context, scheduleID int64, limit int) ([]LiveRoom, error) {
+        if limit <= 0 {
+                limit = 50
+        }
+        rows, err := m.db.QueryContext(ctx, `
+                SELECT `+liveRoomCols+`,
+                       u.nick_name, u.icon,
+                       u2.nick_name, u2.icon
+                FROM match_schedule_room msr
+                INNER JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN user u  ON u.uid  = r.uid
+                LEFT JOIN user u2 ON u2.uid = r.assistant_uid
+                WHERE msr.schedule_id = ? AND msr.status = 1
+                ORDER BY r.mark_type DESC, (r.visit_count + r.fictitious_visit_count) DESC, r.uid ASC
+                LIMIT ?`, scheduleID, limit)
+        if err != nil {
+                return nil, err
+        }
+        defer rows.Close()
+        return scanLiveRooms(rows)
+}
+
 func scanCatalogRows(rows *sql.Rows) ([]MatchCatalogRow, error) {
         var out []MatchCatalogRow
         for rows.Next() {

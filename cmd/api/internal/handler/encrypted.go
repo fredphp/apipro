@@ -136,7 +136,9 @@ func LiveHotHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 func LiveCateListHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
         return func(w http.ResponseWriter, r *http.Request) {
                 param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "live_types", param)
+                // AUDIT-001: dispatch to live_cateList (rooms filtered by liveTypeId),
+                // NOT live_types (which returns the live-type catalog for /live_types.json).
+                resp, err := callRPC(svcCtx, w, r, "live_cateList", param)
                 if err != nil {
                         return
                 }
