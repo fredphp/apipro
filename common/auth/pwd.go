@@ -1,72 +1,95 @@
 package auth
 
-// zbyy-compatible password encryption.
+// Password hashing matching backend-zero.
 //
-// The zbyy frontend (src/js/utils/common.js) encrypts the password BEFORE
-// sending it to the server:
+// Algorithm (audience accounts, pwd_type=2 ONLY):
 //
-//   md5Pwd(password, pwdType):
-//     pwdType == 2  ->  md5(password)
-//     pwdType == 1  ->  md5( md5(password.toLowerCase()) + SECRET_KEY )
-//                       where SECRET_KEY = "&%*$8@!!%"
+//	client_pwd = lowercase_md5_hex(plain_password)   // CASE-SENSITIVE on input; md5 output is lowercase
+//	db_password = lowercase_md5_hex(client_pwd + salt)
+//	salt = base64.StdEncoding(32 random bytes) = 44 ASCII chars
 //
-// The server therefore NEVER sees the raw password. It stores the
-// client-encrypted string as-is and compares it directly on login.
+// pwd_type=1 is UNSUPPORTED (returns ErrUnsupportedPwdType).
 //
-// This module replicates that exact algorithm so that:
-//   1. The server can verify client-sent passwords.
-//   2. Admin/seed tools can pre-compute hashes for seed users.
-//   3. The API can optionally accept a raw password (with PwdType set) and
-//      compute the hash server-side for convenience/testing.
+// Test vectors (verified against backend-zero password_test.go):
+//	MD5Hex("qwe123") = "200820e3227815ed1756a6b531e7e0d2"
+//	DBPassword("200820e3227815ed1756a6b531e7e0d2", "7Whd1U2T1pjeDP4HcSVDxwBMF5Vf6NWx")
+//	  = "8ec733b6de4825a437faee2c01ddd309"
 
 import (
 	"crypto/md5"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
-	"strings"
+	"errors"
 )
 
-// SecretKey must match zbyy constant.js SECRET_KEY.
-const SecretKey = "&%*$8@!!%"
+const (
+	PwdTypeMD5 = 2 // pwd_type=2 is the only supported type
+)
 
-// Md5Pwd replicates zbyy's common.md5Pwd(password, pwdType).
-// pwdType 2 => md5(password); anything else => md5(md5(lower)+secret).
-func Md5Pwd(password string, pwdType int) string {
-	if pwdType == 2 {
-		return md5Hex(password)
-	}
-	inner := md5Hex(strings.ToLower(password))
-	return md5Hex(inner + SecretKey)
-}
+// Errors
+var (
+	ErrUnsupportedPwdType = errors.New("auth: pwd_type=1 is unsupported; use pwd_type=2")
+	ErrEmptyPassword      = errors.New("auth: empty password")
+)
 
-// Verify compares a client-sent (already-encrypted) password against the
-// stored hash. Because the client already encrypted it, this is a direct
-// string comparison.
-func Verify(clientEncrypted, stored string) bool {
-	if clientEncrypted == "" || stored == "" {
-		return false
-	}
-	return constantTimeEq(clientEncrypted, stored)
-}
-
-// VerifyRaw computes Md5Pwd(raw, pwdType) then compares with stored.
-// Useful when the API receives a raw password (e.g. admin endpoints).
-func VerifyRaw(raw string, pwdType int, stored string) bool {
-	return Verify(Md5Pwd(raw, pwdType), stored)
-}
-
-func md5Hex(s string) string {
+// MD5Hex returns the lowercase hex md5 of the UTF-8 bytes of s.
+func MD5Hex(s string) string {
 	h := md5.Sum([]byte(s))
 	return hex.EncodeToString(h[:])
 }
 
-// constantTimeEq prevents timing attacks on password comparison.
-func constantTimeEq(a, b string) bool {
-	if len(a) != len(b) {
+// ClientPassword replicates the client-side pre-hash. pwd_type=2 returns
+// MD5Hex(plain); pwd_type=1 returns ErrUnsupportedPwdType.
+func ClientPassword(plain string, pwdType int) (string, error) {
+	if pwdType != PwdTypeMD5 {
+		return "", ErrUnsupportedPwdType
+	}
+	if plain == "" {
+		return "", ErrEmptyPassword
+	}
+	return MD5Hex(plain), nil
+}
+
+// HashPassword takes the client-pre-hashed md5 (what the client sends as
+// `password`) and returns (dbPassword, salt, err). The salt is 44-char base64
+// of 32 random bytes. dbPassword = MD5Hex(clientMd5 + salt).
+//
+// plainMd5 is what the client sent (already md5 of the raw password).
+// It is NOT re-hashed.
+func HashPassword(plainMd5 string) (storedHash, salt string, err error) {
+	if plainMd5 == "" {
+		return "", "", ErrEmptyPassword
+	}
+	salt, err = RandomSalt()
+	if err != nil {
+		return "", "", err
+	}
+	storedHash = DBPassword(plainMd5, salt)
+	return storedHash, salt, nil
+}
+
+// DBPassword = MD5Hex(clientMd5 + salt). Salt is appended DIRECTLY.
+func DBPassword(clientMd5, salt string) string {
+	return MD5Hex(clientMd5 + salt)
+}
+
+// VerifyPassword compares a client-sent md5 against the stored hash + salt.
+// constant-time on the final comparison.
+func VerifyPassword(plainMd5, storedHash, salt string) bool {
+	if plainMd5 == "" || storedHash == "" {
 		return false
 	}
-	var r byte
-	for i := 0; i < len(a); i++ {
-		r |= a[i] ^ b[i]
+	computed := DBPassword(plainMd5, salt)
+	return subtle.ConstantTimeCompare([]byte(computed), []byte(storedHash)) == 1
+}
+
+// RandomSalt = base64(32 random bytes) — 44-char ASCII string.
+func RandomSalt() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
 	}
-	return r == 0
+	return base64.StdEncoding.EncodeToString(raw[:]), nil
 }

@@ -1,27 +1,57 @@
 package model
 
-// Match model — reads from the `matches` table + `match_anchors` join.
+// MatchSchedule model — reads from `match_schedule` + `match_schedule_room`
+// + `live_room` + `user` (anchor).
+//
+// MatchCatalogRow is the joined result used to build MatchCatalogItem JSON.
 
 import (
         "context"
         "database/sql"
         "fmt"
+        "time"
 )
 
-type Match struct {
-        ScheduleId        string
-        SubCateName       string
-        CateName          string
-        MatchTime         string
-        MatchDate         string
-        HostName          string
-        HostIcon          string
-        GuestName         string
-        GuestIcon         string
-        Venue             string
-        Status            string
-        ReservationStatus int32
-        CreatedAt         int64
+type MatchSchedule struct {
+        ScheduleID     int64
+        HostName       string
+        GuestName      string
+        HostScore      sql.NullInt64
+        GuestScore     sql.NullInt64
+        MatchTime      sql.NullTime
+        LiveType       sql.NullInt64
+        LiveTypeParent sql.NullInt64
+        HostIcon       string
+        GuestIcon      string
+        SubCateName    string
+        MatchStatus    sql.NullInt64
+        Status         int32
+        Hot            int32
+        GreenMatch     int32
+}
+
+// MatchCatalogRow is the joined row used for the catalog JSON.
+type MatchCatalogRow struct {
+        ScheduleID     int64
+        MatchTime      string // DATETIME returned as string (SQLite has no DATETIME type)
+        HostName       string
+        GuestName      string
+        HostScore      int
+        GuestScore     int
+        MatchStatus    int
+        HostIcon       string
+        GuestIcon      string
+        SubCateName    string
+        LiveType       int64
+        LiveTypeParent int64
+        CategoryIcon   string // lt.icon (live_type join on live_type_parent)
+        CategoryName   string // lt.type_name
+        AnchorUID      int64
+        AnchorNickName string
+        AnchorIcon     string
+        RoomNum        string
+        RoomDetail     string
+        RoomNotice     string
 }
 
 type MatchModel struct {
@@ -30,133 +60,192 @@ type MatchModel struct {
 
 func NewMatchModel(db *sql.DB) *MatchModel { return &MatchModel{db: db} }
 
-const matchCols = `schedule_id, sub_cate_name, cate_name, match_time, match_date, host_name, host_icon, guest_name, guest_icon, venue, status, reservation_status, created_at`
-
-func (m *MatchModel) FindByID(ctx context.Context, id string) (*Match, error) {
-        row := m.db.QueryRowContext(ctx, `SELECT `+matchCols+` FROM matches WHERE schedule_id=?`, id)
-        return scanMatch(row)
-}
-
-func (m *MatchModel) ListByDate(ctx context.Context, date string) ([]Match, error) {
-        rows, err := m.db.QueryContext(ctx, `SELECT `+matchCols+` FROM matches WHERE match_date=? ORDER BY match_time ASC`, date)
-        if err != nil {
-                return nil, err
-        }
-        defer rows.Close()
-        return scanMatches(rows)
-}
-
-func (m *MatchModel) ListByCate(ctx context.Context, cate string) ([]Match, error) {
-        rows, err := m.db.QueryContext(ctx, `SELECT `+matchCols+` FROM matches WHERE cate_name=? ORDER BY match_time ASC`, cate)
-        if err != nil {
-                return nil, err
-        }
-        defer rows.Close()
-        return scanMatches(rows)
-}
-
-func (m *MatchModel) ListRecommend(ctx context.Context, limit int) ([]Match, error) {
+// ListCatalog returns the joined catalog rows for live_type_parent ∈ parents,
+// enabled status, ordered by match_time ASC. Each row is one (match, anchor)
+// pair — the caller must group by schedule_id.
+func (m *MatchModel) ListCatalog(ctx context.Context, parents []int64, limit int) ([]MatchCatalogRow, error) {
         if limit <= 0 {
-                limit = 5
+                limit = 100
         }
-        rows, err := m.db.QueryContext(ctx,
-                `SELECT `+matchCols+` FROM matches WHERE status IN ('living','not_started') ORDER BY status ASC, match_time ASC LIMIT ?`, limit)
+        if len(parents) == 0 {
+                return nil, nil
+        }
+        // Build IN clause
+        args := []interface{}{}
+        q := `SELECT ms.schedule_id, ms.match_time, ms.host_name, ms.guest_name,
+                       COALESCE(ms.host_score, 0), COALESCE(ms.guest_score, 0),
+                       COALESCE(ms.match_status, 0), ms.host_icon, ms.guest_icon,
+                       ms.sub_type_name, COALESCE(ms.live_type, 0), COALESCE(ms.live_type_parent, 0),
+                       COALESCE(lt.icon, ''), COALESCE(lt.type_name, ''),
+                       u.uid, u.nick_name, u.icon,
+                       r.room_num, r.detail, r.notice
+                FROM match_schedule ms
+                INNER JOIN match_schedule_room msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
+                LEFT JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN user u ON u.uid = r.uid
+                LEFT JOIN live_type lt ON lt.live_type_id = ms.live_type_parent
+                WHERE ms.status = 1 AND ms.live_type_parent IN (` + placeholders(len(parents)) + `)
+                ORDER BY ms.match_time ASC LIMIT ?`
+        for _, p := range parents {
+                args = append(args, p)
+        }
+        args = append(args, limit)
+        rows, err := m.db.QueryContext(ctx, q, args...)
         if err != nil {
                 return nil, err
         }
         defer rows.Close()
-        return scanMatches(rows)
+        return scanCatalogRows(rows)
 }
 
-func (m *MatchModel) ListCateNames(ctx context.Context) ([]string, error) {
-        rows, err := m.db.QueryContext(ctx, `SELECT DISTINCT cate_name FROM matches WHERE cate_name != '' ORDER BY cate_name ASC`)
+// ListByDate returns catalog rows for a specific date (YYYYMMDD).
+func (m *MatchModel) ListByDate(ctx context.Context, dateStr string, limit int) ([]MatchCatalogRow, error) {
+        if limit <= 0 {
+                limit = 100
+        }
+        // dateStr is YYYYMMDD; convert to YYYY-MM-DD for the SQL compare (stored
+        // as "YYYY-MM-DD HH:MM:SS" text in SQLite / DATETIME in MySQL).
+        // Accept either YYYYMMDD or YYYY-MM-DD input.
+        normalized := dateStr
+        if len(dateStr) == 8 {
+                normalized = dateStr[:4] + "-" + dateStr[4:6] + "-" + dateStr[6:8]
+        }
+        start := normalized + " 00:00:00"
+        end := normalized + " 23:59:59"
+        rows, err := m.db.QueryContext(ctx, `
+                SELECT ms.schedule_id, ms.match_time, ms.host_name, ms.guest_name,
+                       COALESCE(ms.host_score, 0), COALESCE(ms.guest_score, 0),
+                       COALESCE(ms.match_status, 0), ms.host_icon, ms.guest_icon,
+                       ms.sub_type_name, COALESCE(ms.live_type, 0), COALESCE(ms.live_type_parent, 0),
+                       COALESCE(lt.icon, ''), COALESCE(lt.type_name, ''),
+                       u.uid, u.nick_name, u.icon,
+                       r.room_num, r.detail, r.notice
+                FROM match_schedule ms
+                INNER JOIN match_schedule_room msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
+                LEFT JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN user u ON u.uid = r.uid
+                LEFT JOIN live_type lt ON lt.live_type_id = ms.live_type_parent
+                WHERE ms.status = 1 AND ms.match_time >= ? AND ms.match_time <= ?
+                ORDER BY ms.match_time ASC LIMIT ?`, start, end, limit)
         if err != nil {
                 return nil, err
         }
         defer rows.Close()
-        var out []string
+        return scanCatalogRows(rows)
+}
+
+// ListRecommend returns up to N hot upcoming matches (with anchors). Requires
+// at least one linked anchor room (EXISTS in match_schedule_room).
+func (m *MatchModel) ListRecommend(ctx context.Context, limit int) ([]MatchCatalogRow, error) {
+        if limit <= 0 {
+                limit = 8
+        }
+        rows, err := m.db.QueryContext(ctx, `
+                SELECT ms.schedule_id, ms.match_time, ms.host_name, ms.guest_name,
+                       COALESCE(ms.host_score, 0), COALESCE(ms.guest_score, 0),
+                       COALESCE(ms.match_status, 0), ms.host_icon, ms.guest_icon,
+                       ms.sub_type_name, COALESCE(ms.live_type, 0), COALESCE(ms.live_type_parent, 0),
+                       COALESCE(lt.icon, ''), COALESCE(lt.type_name, ''),
+                       u.uid, u.nick_name, u.icon,
+                       r.room_num, r.detail, r.notice
+                FROM match_schedule ms
+                INNER JOIN match_schedule_room msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
+                LEFT JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN user u ON u.uid = r.uid
+                LEFT JOIN live_type lt ON lt.live_type_id = ms.live_type_parent
+                WHERE ms.status = 1
+                ORDER BY ms.hot DESC, ms.match_time ASC LIMIT ?`, limit)
+        if err != nil {
+                return nil, err
+        }
+        defer rows.Close()
+        return scanCatalogRows(rows)
+}
+
+// ListByRoom returns schedules linked to a room (for /room/:roomNum/schedule.json).
+func (m *MatchModel) ListByRoom(ctx context.Context, roomNum string, limit int) ([]MatchCatalogRow, error) {
+        if limit <= 0 {
+                limit = 50
+        }
+        rows, err := m.db.QueryContext(ctx, `
+                SELECT ms.schedule_id, ms.match_time, ms.host_name, ms.guest_name,
+                       COALESCE(ms.host_score, 0), COALESCE(ms.guest_score, 0),
+                       COALESCE(ms.match_status, 0), ms.host_icon, ms.guest_icon,
+                       ms.sub_type_name, COALESCE(ms.live_type, 0), COALESCE(ms.live_type_parent, 0),
+                       COALESCE(lt.icon, ''), COALESCE(lt.type_name, ''),
+                       u.uid, u.nick_name, u.icon,
+                       r.room_num, r.detail, r.notice
+                FROM match_schedule ms
+                INNER JOIN match_schedule_room msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1 AND msr.room_num = ?
+                LEFT JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN user u ON u.uid = r.uid
+                LEFT JOIN live_type lt ON lt.live_type_id = ms.live_type_parent
+                WHERE ms.status = 1
+                ORDER BY ms.match_time ASC LIMIT ?`, roomNum, limit)
+        if err != nil {
+                return nil, err
+        }
+        defer rows.Close()
+        return scanCatalogRows(rows)
+}
+
+func scanCatalogRows(rows *sql.Rows) ([]MatchCatalogRow, error) {
+        var out []MatchCatalogRow
         for rows.Next() {
-                var s string
-                if err := rows.Scan(&s); err != nil {
+                var r MatchCatalogRow
+                var anchorUID sql.NullInt64
+                var anchorNick, anchorIcon, roomNum, roomDetail, roomNotice sql.NullString
+                if err := rows.Scan(&r.ScheduleID, &r.MatchTime, &r.HostName, &r.GuestName,
+                        &r.HostScore, &r.GuestScore, &r.MatchStatus, &r.HostIcon, &r.GuestIcon,
+                        &r.SubCateName, &r.LiveType, &r.LiveTypeParent,
+                        &r.CategoryIcon, &r.CategoryName,
+                        &anchorUID, &anchorNick, &anchorIcon,
+                        &roomNum, &roomDetail, &roomNotice); err != nil {
                         return nil, err
                 }
-                out = append(out, s)
+                r.AnchorUID = anchorUID.Int64
+                r.AnchorNickName = anchorNick.String
+                r.AnchorIcon = anchorIcon.String
+                r.RoomNum = roomNum.String
+                r.RoomDetail = roomDetail.String
+                r.RoomNotice = roomNotice.String
+                out = append(out, r)
         }
         return out, rows.Err()
 }
 
-// ListByAnchorRoom returns matches whose linked anchors own the given room.
-func (m *MatchModel) ListByAnchorRoom(ctx context.Context, roomNum string) ([]Match, error) {
-        rows, err := m.db.QueryContext(ctx,
-                `SELECT DISTINCT m.schedule_id, m.sub_cate_name, m.cate_name, m.match_time,
-                 m.match_date, m.host_name, m.host_icon, m.guest_name, m.guest_icon,
-                 m.venue, m.status, m.reservation_status, m.created_at
-                 FROM matches m
-                 INNER JOIN match_anchors ma ON ma.match_id = m.schedule_id
-                 INNER JOIN anchors a ON a.uid = ma.anchor_uid
-                 WHERE a.room_num = ?
-                 ORDER BY m.match_time ASC`, roomNum)
-        if err != nil {
-                return nil, err
+func placeholders(n int) string {
+        if n <= 0 {
+                return ""
         }
-        defer rows.Close()
-        return scanMatches(rows)
+        out := "?"
+        for i := 1; i < n; i++ {
+                out += ",?"
+        }
+        return out
 }
 
-func scanMatch(row *sql.Row) (*Match, error) {
-        var mm Match
-        err := row.Scan(&mm.ScheduleId, &mm.SubCateName, &mm.CateName, &mm.MatchTime,
-                &mm.MatchDate, &mm.HostName, &mm.HostIcon, &mm.GuestName, &mm.GuestIcon,
-                &mm.Venue, &mm.Status, &mm.ReservationStatus, &mm.CreatedAt)
-        if err != nil {
-                if err == sql.ErrNoRows {
-                        return nil, ErrNotFound
+// MatchTimeToMS converts a match_time string (e.g. "2026-08-08 05:02:28")
+// to milliseconds since epoch (UTC). Returns 0 if empty or invalid.
+// Handles both Go-style and SQLite strftime() output.
+func MatchTimeToMS(s string) int64 {
+        if s == "" {
+                return 0
+        }
+        for _, layout := range []string{"2006-01-02 15:04:05", "2006-01-02T15:04:05", time.RFC3339, "2006-01-02"} {
+                if t, err := time.ParseInLocation(layout, s, time.Local); err == nil {
+                        return t.UTC().UnixMilli()
                 }
-                return nil, err
         }
-        return &mm, nil
+        return 0
 }
 
-func scanMatches(rows *sql.Rows) ([]Match, error) {
-        var out []Match
-        for rows.Next() {
-                var mm Match
-                if err := rows.Scan(&mm.ScheduleId, &mm.SubCateName, &mm.CateName, &mm.MatchTime,
-                        &mm.MatchDate, &mm.HostName, &mm.HostIcon, &mm.GuestName, &mm.GuestIcon,
-                        &mm.Venue, &mm.Status, &mm.ReservationStatus, &mm.CreatedAt); err != nil {
-                        return nil, err
-                }
-                out = append(out, mm)
-        }
-        return out, rows.Err()
+// FormatDateKey returns YYYYMMDD for a time.
+func FormatDateKey(t time.Time) string {
+        return t.Format("20060102")
 }
 
-func (m *Match) DebugString() string {
-        return fmt.Sprintf("id=%s %s vs %s %s", m.ScheduleId, m.HostName, m.GuestName, m.Status)
-}
-
-// LiveType model
-type LiveType struct {
-        Code      string
-        Name      string
-        Icon      string
-        SortOrder int32
-}
-
-func (m *MatchModel) ListLiveTypes(ctx context.Context) ([]LiveType, error) {
-        rows, err := m.db.QueryContext(ctx,
-                `SELECT code, name, icon, sort_order FROM live_types WHERE status=1 ORDER BY sort_order ASC`)
-        if err != nil {
-                return nil, err
-        }
-        defer rows.Close()
-        var out []LiveType
-        for rows.Next() {
-                var lt LiveType
-                if err := rows.Scan(&lt.Code, &lt.Name, &lt.Icon, &lt.SortOrder); err != nil {
-                        return nil, err
-                }
-                out = append(out, lt)
-        }
-        return out, rows.Err()
+// DebugString for MatchSchedule (logging).
+func (ms *MatchSchedule) DebugString() string {
+        return fmt.Sprintf("schedule=%d %s vs %s parent=%d", ms.ScheduleID, ms.HostName, ms.GuestName, ms.LiveTypeParent.Int64)
 }

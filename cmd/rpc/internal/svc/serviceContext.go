@@ -2,34 +2,62 @@ package svc
 
 import (
         "context"
+        "encoding/json"
+        "fmt"
+        "strings"
         "time"
 
         "apipro/cmd/rpc/internal/config"
+        "apipro/common/auth"
         "apipro/common/cache"
         "apipro/common/db"
         "apipro/common/model"
-        "apipro/common/store"
-        "apipro/pkg/fixture"
 
         "github.com/zeromicro/go-zero/core/logx"
         "github.com/zeromicro/go-zero/core/stores/redis"
 )
 
+// ServiceContext wires up all dependencies for the RPC server.
 type ServiceContext struct {
         Config    config.Config
         Redis     *redis.Redis
         Cache     *cache.Cache
         Scheduler *cache.Scheduler
-        Users     *store.UserStore
-        Models    *Models
+
+        Models *Models
+
+        Sessions  *auth.SessionStore
+        SmsStore  *SmsStore
+        UserAsset UserAssetPrefixer
 }
 
 // Models bundles all data models for convenient access from logic.
 type Models struct {
-        Users    *model.UserModel
-        Anchors  *model.AnchorModel
-        Rooms    *model.RoomModel
-        Matches  *model.MatchModel
+        Users        *model.UserModel
+        Anchors      *model.AnchorModel
+        Rooms        *model.LiveRoomModel
+        Matches      *model.MatchModel
+        LiveTypes    *model.LiveTypeModel
+        GiftRanks    *model.RoomGiftRankModel
+        ChatMessages *model.ChatRoomMessageModel
+}
+
+// UserAssetPrefixer prepends FileBaseURL to relative asset paths (icon/cover).
+type UserAssetPrefixer struct {
+        Base string
+}
+
+func (u UserAssetPrefixer) URL(p string) string {
+        if p == "" {
+                return ""
+        }
+        if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") {
+                return p
+        }
+        if u.Base == "" {
+                return p
+        }
+        return strings.TrimRight(u.Base, "/") + "/" + strings.TrimLeft(p, "/")
 }
 
 func NewServiceContext(c config.Config) *ServiceContext {
@@ -37,36 +65,40 @@ func NewServiceContext(c config.Config) *ServiceContext {
         ch := cache.New(rdb)
         sch := cache.NewScheduler()
 
-        // ---- Database (data source) ----
         sqlDB := db.MustNew(c.DBDriver, c.DataSource)
         models := &Models{
-                Users:   model.NewUserModel(sqlDB),
-                Anchors: model.NewAnchorModel(sqlDB),
-                Rooms:   model.NewRoomModel(sqlDB),
-                Matches: model.NewMatchModel(sqlDB),
+                Users:        model.NewUserModel(sqlDB),
+                Anchors:      model.NewAnchorModel(sqlDB),
+                Rooms:        model.NewLiveRoomModel(sqlDB),
+                Matches:      model.NewMatchModel(sqlDB),
+                LiveTypes:    model.NewLiveTypeModel(sqlDB),
+                GiftRanks:    model.NewRoomGiftRankModel(sqlDB),
+                ChatMessages: model.NewChatRoomMessageModel(sqlDB),
         }
-        users := store.NewUserStore(models.Users, rdb)
 
-        // ---- Scheduled cache refresh (定时刷新缓存) ----
+        // Sessions (Redis-backed opaque tokens).
+        sessions := auth.NewSessionStore(rdb)
+
+        // SMS code store (Redis).
+        sms := NewSmsStore(rdb, c.Mode, c.SmsDevBypassCode)
+
+        // Bootstrap chat message ID counter from DB.
+        bootChatMsgIDCounter(context.Background(), rdb, models.ChatMessages)
+
+        // ---- Scheduled cache refresh ----
         // Each job reads from the DB and warms the Redis cache so that hot keys
-        // are always fresh and requests rarely hit the DB.
+        // are always fresh.
         sch.Add(cache.RefreshJob{
                 Family: "match", Every: dur(c.RefreshMatchListTtl, 60),
                 Run: func() error {
                         ctx := context.Background()
-                        // warm today + next 6 days
+                        // Warm today + next 6 days + the catalog (matches.json) + recommend
+                        _ = warmMatchCatalog(ctx, ch, models, dur(c.CacheMatchListTtl, 60))
+                        _ = warmRecommend(ctx, ch, models, dur(c.CacheMatchListTtl, 60))
                         for d := 0; d < 7; d++ {
                                 date := time.Now().AddDate(0, 0, d).Format("20060102")
-                                _ = cache.Refresh(ctx, ch, "match", "date:"+date, dur(c.CacheMatchListTtl, 60), func() ([]fixture.MatchItem, error) {
-                                        return LoadMatchesByDate(ctx, models, date)
-                                })
+                                _ = warmMatchByDate(ctx, ch, models, date, dur(c.CacheMatchListTtl, 60))
                         }
-                        _ = cache.Refresh(ctx, ch, "match", "recommend", dur(c.CacheMatchListTtl, 60), func() ([]fixture.MatchItem, error) {
-                                return LoadRecommend(ctx, models)
-                        })
-                        _ = cache.Refresh(ctx, ch, "match", "cates", dur(c.CacheMatchListTtl, 60), func() ([]string, error) {
-                                return models.Matches.ListCateNames(ctx)
-                        })
                         return nil
                 },
         })
@@ -74,23 +106,8 @@ func NewServiceContext(c config.Config) *ServiceContext {
                 Family: "live", Every: dur(c.RefreshLiveTtl, 15),
                 Run: func() error {
                         ctx := context.Background()
-                        _ = cache.Refresh(ctx, ch, "live", "list", dur(c.CacheLiveTtl, 15), func() ([]fixture.LiveRoom, error) {
-                                return LoadLiveRooms(ctx, models)
-                        })
-                        _ = cache.Refresh(ctx, ch, "live", "types", dur(c.CacheLiveTtl, 15), func() ([]fixture.LiveType, error) {
-                                return LoadLiveTypes(ctx, models)
-                        })
-                        _ = cache.Refresh(ctx, ch, "live", "hot", dur(c.CacheLiveTtl, 15), func() ([]fixture.Commentator, error) {
-                                return LoadHotAnchors(ctx, models, 6)
-                        })
-                        // refresh each room detail cache
-                        rooms, _ := models.Rooms.ListAll(ctx)
-                        for _, r := range rooms {
-                                rn := r.RoomNum
-                                _ = cache.Refresh(ctx, ch, "room", "num:"+rn, dur(c.CacheRoomDetailTtl, 30), func() (fixture.RoomDetail, error) {
-                                        return LoadRoomDetail(ctx, models, rn)
-                                })
-                        }
+                        _ = warmLiveRooms(ctx, ch, models, dur(c.CacheLiveTtl, 15))
+                        _ = warmLiveTypes(ctx, ch, models, dur(c.CacheLiveTtl, 15))
                         return nil
                 },
         })
@@ -98,24 +115,18 @@ func NewServiceContext(c config.Config) *ServiceContext {
                 Family: "commentator", Every: dur(c.RefreshCommentatorTtl, 120),
                 Run: func() error {
                         ctx := context.Background()
-                        _ = cache.Refresh(ctx, ch, "commentator", "list", dur(c.CacheCommentatorTtl, 120), func() ([]fixture.Commentator, error) {
-                                return LoadCommentators(ctx, models)
+                        _ = cache.Refresh(ctx, ch, "commentator", "list", dur(c.CacheCommentatorTtl, 120), func() ([]model.Anchor, error) {
+                                return models.Anchors.ListAll(ctx)
                         })
-                        anchors, _ := models.Anchors.ListAll(ctx)
-                        for _, a := range anchors {
-                                uid := a.Uid
-                                _ = cache.Refresh(ctx, ch, "commentator", "uid:"+uid, dur(c.CacheCommentatorTtl, 120), func() (fixture.Commentator, error) {
-                                        return LoadCommentator(ctx, models, uid)
-                                })
-                        }
                         return nil
                 },
         })
 
-        logx.Infof("ServiceContext ready: DBDriver=%s", c.DBDriver)
+        logx.Infof("ServiceContext ready: DBDriver=%s mode=%s", c.DBDriver, c.Mode)
         return &ServiceContext{
                 Config: c, Redis: rdb, Cache: ch, Scheduler: sch,
-                Users: users, Models: models,
+                Models: models, Sessions: sessions, SmsStore: sms,
+                UserAsset: UserAssetPrefixer{Base: c.FileBaseURL},
         }
 }
 
@@ -124,4 +135,66 @@ func dur(seconds, fallback int) time.Duration {
                 seconds = fallback
         }
         return time.Duration(seconds) * time.Second
+}
+
+// bootChatMsgIDCounter seeds the Redis chat_room_message_id counter from DB MAX.
+func bootChatMsgIDCounter(ctx context.Context, rdb *redis.Redis, m *model.ChatRoomMessageModel) {
+        if rdb == nil {
+                return
+        }
+        maxID, err := m.MaxID(ctx)
+        if err != nil {
+                logx.Errorf("boot chat msg id: %v", err)
+                return
+        }
+        if maxID > 0 {
+                // Try to set; if key already exists with a higher value, INCR will keep going.
+                _ = rdb.Set("yuyan:chat:message_id", fmt.Sprintf("%d", maxID))
+        }
+}
+
+// ----- warm helpers (write-through to cache) -----
+
+func warmMatchCatalog(ctx context.Context, ch *cache.Cache, m *Models, ttl time.Duration) error {
+        return cache.Refresh(ctx, ch, "match", "catalog", ttl, func() ([]byte, error) {
+                out := BuildMatchCatalog(ctx, m)
+                b, _ := json.Marshal(out)
+                return b, nil
+        })
+}
+
+func warmRecommend(ctx context.Context, ch *cache.Cache, m *Models, ttl time.Duration) error {
+        return cache.Refresh(ctx, ch, "match", "recommend", ttl, func() ([]byte, error) {
+                out := BuildRecommend(ctx, m)
+                b, _ := json.Marshal(out)
+                return b, nil
+        })
+}
+
+func warmMatchByDate(ctx context.Context, ch *cache.Cache, m *Models, date string, ttl time.Duration) error {
+        return cache.Refresh(ctx, ch, "match", "date:"+date, ttl, func() ([]byte, error) {
+                out := BuildMatchByDate(ctx, m, date)
+                b, _ := json.Marshal(out)
+                return b, nil
+        })
+}
+
+func warmLiveRooms(ctx context.Context, ch *cache.Cache, m *Models, ttl time.Duration) error {
+        return cache.Refresh(ctx, ch, "live", "all", ttl, func() ([]byte, error) {
+                out := BuildAllLiveRooms(ctx, m)
+                b, _ := json.Marshal(out)
+                return b, nil
+        })
+}
+
+func warmLiveTypes(ctx context.Context, ch *cache.Cache, m *Models, ttl time.Duration) error {
+        return cache.Refresh(ctx, ch, "live", "types", ttl, func() ([]byte, error) {
+                lts, err := m.LiveTypes.ListTopLevel(ctx)
+                if err != nil {
+                        return nil, err
+                }
+                out := BuildLiveTypesJSON(lts)
+                b, _ := json.Marshal(out)
+                return b, nil
+        })
 }

@@ -1,56 +1,59 @@
 Name: apipro
 Host: 0.0.0.0
 Port: 3100
-Mode: dev
+AppMode: dev
 
 # ============================================================
-# RPC 服务连接（gRPC 调用 apipro-rpc）
+# RPC client → apipro-rpc on 127.0.0.1:3101
 # ============================================================
-# Endpoints 指向 RPC 服务的 ListenOn 地址
-# 本地单机部署保持 127.0.0.1:3101 即可
-# 多机部署时填 RPC 服务器的内网地址
 ApiproRpc:
   Endpoints:
     - 127.0.0.1:3101
   NonBlock: true
-  Timeout: 2000000000   # 2 秒（纳秒）
+  Timeout: 2000000000   # 2 seconds (nanoseconds)
 
 # ============================================================
-# Redis 配置（限流 + 聊天历史）
+# Redis (sessions + rate limit + chat history + shared cache)
 # ============================================================
-# 必须和 cmd/rpc/etc/apipro.yaml 的 CacheRedis 指向同一个 Redis 实例
 Redis:
   Host: 127.0.0.1:6399
   Type: node
-  # Pass: ""
 
 # ============================================================
-# JWT 鉴权（必须和 RPC 的 JwtSecret 完全一致）
+# Transport encryption (must match RPC)
 # ============================================================
-Auth:
-  AccessSecret: "apipro-dev-secret-change-me-please-0123456789-abcdef"
-  AccessExpire: 900       # 15 分钟（秒）
-  RefreshExpire: 604800   # 7 天（秒）
-
-AccessTtl: 900s
-RefreshTtl: 604800s
+ApiKeyReq: "PHp1st5vEg5Ca8FH"
+ApiKeyResp: "qlCJekfRKwWkQxl7"
 
 # ============================================================
-# 限流（每 IP / 每用户 每分钟最大请求数）
+# App mode + SMS dev bypass
 # ============================================================
-RateLimitPerMinute: 120        # 全局每 IP 每分钟 120 次
-RateLimitAuthPerMinute: 20     # 登录/注册类接口每 IP 每分钟 20 次（防爆破）
+SmsDevBypassCode: "8888"
 
 # ============================================================
-# 聊天配置（必须和 RPC 一致）
+# JSONP snapshot directory (served as static files)
+# ============================================================
+JsonpSnapshotDir: ./data/jsonp
+
+# ============================================================
+# File asset URL prefix
+# ============================================================
+FileBaseURL: "https://sta.ncctrials.com/file"
+
+# ============================================================
+# Rate limits
+# ============================================================
+RateLimitPerMinute: 120
+RateLimitAuthPerMinute: 20
+
+# ============================================================
+# Chat
 # ============================================================
 ChatMaxMsgLen: 500
 ChatHistoryLim: 50
 ChatRatePerMin: 60
 
 # ============================================================
-# CORS（跨域）
+# CORS
 # ============================================================
-# 生产环境建议改成具体域名，如 https://www.zbyy.com
-# 开发环境用 * 即可
 CorsOrigin: "*"

@@ -1,41 +1,57 @@
 package config
 
 import (
-	"time"
+        "time"
 
-	"github.com/zeromicro/go-zero/core/stores/redis"
-	"github.com/zeromicro/go-zero/rest"
-	"github.com/zeromicro/go-zero/zrpc"
+        "github.com/zeromicro/go-zero/core/stores/redis"
+        "github.com/zeromicro/go-zero/rest"
+        "github.com/zeromicro/go-zero/zrpc"
 )
 
 type Config struct {
-	rest.RestConf
+        rest.RestConf
 
-	// Internal RPC client (direct, no etcd)
-	ApiproRpc zrpc.RpcClientConf
+        // Internal RPC client (direct, no etcd)
+        ApiproRpc zrpc.RpcClientConf
 
-	// Redis for rate limit + chat history + (optional) shared cache
-	Redis redis.RedisConf
+        // Redis for rate limit + chat history + session store
+        Redis redis.RedisConf
 
-	Auth struct {
-		AccessSecret string
-		AccessExpire int64
-		RefreshExpire int64
-	}
+        // Transport encryption keys — same as RPC.
+        ApiKeyReq  string `json:",optional"`
+        ApiKeyResp string `json:",optional"`
 
-	// Rate limits
-	RateLimitPerMinute     int `json:",default=120"`
-	RateLimitAuthPerMinute int `json:",default=20"`
+        // App mode: "dev" | "prod" (controls SMS dev bypass).
+        // (Mode is inherited from RestConf — use that for go-zero's service mode.)
+        AppMode string `json:",default=dev"`
 
-	// Chat
-	ChatMaxMsgLen  int `json:",default=500"`
-	ChatHistoryLim int `json:",default=50"`
-	ChatRatePerMin int `json:",default=60"`
+        // SMS dev bypass code
+        SmsDevBypassCode string `json:",optional"`
 
-	// CORS
-	CorsOrigin string `json:",optional"`
+        // JSONP snapshot directory
+        JsonpSnapshotDir string `json:",optional"`
 
-	// AccessExpire/RefreshExpire as durations for token issuance passthrough
-	AccessTtl  time.Duration `json:",optional"`
-	RefreshTtl time.Duration `json:",optional"`
+        // File base URL for asset path prefixing
+        FileBaseURL string `json:",optional"`
+
+        // Rate limits
+        RateLimitPerMinute     int `json:",default=120"`
+        RateLimitAuthPerMinute int `json:",default=20"`
+
+        // Chat
+        ChatMaxMsgLen  int `json:",default=500"`
+        ChatHistoryLim int `json:",default=50"`
+        ChatRatePerMin int `json:",default=60"`
+
+        // CORS
+        CorsOrigin string `json:",optional"`
+
+        // Legacy (kept for backwards compat; not used by the new auth flow).
+        AccessTtl  time.Duration `json:",optional"`
+        RefreshTtl time.Duration `json:",optional"`
+        Auth       struct {
+                AccessSecret  string
+                AccessExpire  int64
+                RefreshExpire int64
+        } `json:",optional"`
 }

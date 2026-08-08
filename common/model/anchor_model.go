@@ -1,6 +1,11 @@
 package model
 
-// Anchor (commentator) model — reads from the `anchors` table.
+// Anchor (commentator) model — reads from `anchors` table.
+// Basic user info is in `user`; this table holds anchor extra fields:
+// room_num, detail, notice, cut_out_icon, fans/follow/hot, intro.
+//
+// In backend-zero, anchors are users with user_type=2; this `anchors` table
+// is the "extra profile" denormalized for fast reads.
 
 import (
 	"context"
@@ -9,7 +14,7 @@ import (
 )
 
 type Anchor struct {
-	Uid        string
+	UID        int64
 	NickName   string
 	Icon       string
 	CutOutIcon string
@@ -53,27 +58,20 @@ func (m *AnchorModel) ListHot(ctx context.Context, limit int) ([]Anchor, error) 
 	return scanAnchors(rows)
 }
 
-func (m *AnchorModel) FindByUid(ctx context.Context, uid string) (*Anchor, error) {
+func (m *AnchorModel) FindByUid(ctx context.Context, uid int64) (*Anchor, error) {
 	row := m.db.QueryRowContext(ctx, `SELECT `+anchorCols+` FROM anchors WHERE uid=?`, uid)
-	var a Anchor
-	var live int32
-	err := row.Scan(&a.Uid, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
-		&a.Fans, &a.Follow, &a.Hot, &a.RoomNum, &a.Detail, &a.Notice, &live, &a.CreatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	a.Live = live != 0
-	return &a, nil
+	return scanAnchor(row)
 }
 
 func (m *AnchorModel) FindByRoomNum(ctx context.Context, roomNum string) (*Anchor, error) {
 	row := m.db.QueryRowContext(ctx, `SELECT `+anchorCols+` FROM anchors WHERE room_num=?`, roomNum)
+	return scanAnchor(row)
+}
+
+func scanAnchor(row *sql.Row) (*Anchor, error) {
 	var a Anchor
 	var live int32
-	err := row.Scan(&a.Uid, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
+	err := row.Scan(&a.UID, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
 		&a.Fans, &a.Follow, &a.Hot, &a.RoomNum, &a.Detail, &a.Notice, &live, &a.CreatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -83,18 +81,6 @@ func (m *AnchorModel) FindByRoomNum(ctx context.Context, roomNum string) (*Ancho
 	}
 	a.Live = live != 0
 	return &a, nil
-}
-
-func (m *AnchorModel) ListByMatch(ctx context.Context, matchId string) ([]Anchor, error) {
-	rows, err := m.db.QueryContext(ctx,
-		`SELECT a.`+anchorCols+` FROM anchors a
-		 INNER JOIN match_anchors ma ON ma.anchor_uid = a.uid
-		 WHERE ma.match_id = ?`, matchId)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanAnchors(rows)
 }
 
 func scanAnchors(rows *sql.Rows) ([]Anchor, error) {
@@ -102,7 +88,7 @@ func scanAnchors(rows *sql.Rows) ([]Anchor, error) {
 	for rows.Next() {
 		var a Anchor
 		var live int32
-		if err := rows.Scan(&a.Uid, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
+		if err := rows.Scan(&a.UID, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
 			&a.Fans, &a.Follow, &a.Hot, &a.RoomNum, &a.Detail, &a.Notice, &live, &a.CreatedAt); err != nil {
 			return nil, err
 		}
@@ -113,5 +99,5 @@ func scanAnchors(rows *sql.Rows) ([]Anchor, error) {
 }
 
 func (a *Anchor) DebugString() string {
-	return fmt.Sprintf("uid=%s nick=%s room=%s live=%v", a.Uid, a.NickName, a.RoomNum, a.Live)
+	return fmt.Sprintf("uid=%d nick=%s room=%s live=%v", a.UID, a.NickName, a.RoomNum, a.Live)
 }
