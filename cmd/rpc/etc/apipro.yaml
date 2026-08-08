@@ -2,39 +2,68 @@ Name: apipro.rpc
 ListenOn: 127.0.0.1:3101
 Mode: dev
 
-# ----- Database (数据来源) -----
-# Production: MySQL
-#   DBDriver: mysql
-#   DataSource: user:password@tcp(127.0.0.1:3306)/apipro?charset=utf8mb4&parseTime=true&loc=Local
-# Dev / self-check: SQLite (no server needed)
-#   DBDriver: sqlite
-#   DataSource: ./data/apipro.db
-DBDriver: sqlite
-DataSource: ./data/apipro.db
+# ============================================================
+# 数据库配置（数据来源）
+# ============================================================
+# 支持两种驱动：
+#   1) mysql   —— 生产 / 本地有 MySQL 服务时使用
+#   2) sqlite  —— 纯文件数据库，零依赖，用于快速自测
+#
+# ----- MySQL (推荐：本地有 MySQL 服务时用这个) -----
+DBDriver: mysql
+# DSN 格式: 用户名:密码@tcp(主机:端口)/库名?参数
+# 常用参数:
+#   charset=utf8mb4         字符集（必须，否则中文会乱码）
+#   parseTime=true          自动把 DATETIME 转成 time.Time
+#   loc=Local               使用本机时区
+#   allowNativePasswords=true  MySQL 8 默认 caching_sha2_password，建议加上
+#   timeout=10s             连接超时
+#   readTimeout=30s         读超时
+#   writeTimeout=30s        写超时
+DataSource: root:123456@tcp(127.0.0.1:3306)/apipro?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
 
-# ----- Redis (缓存 + 定时刷新) -----
+# ----- SQLite (如果本地没装 MySQL，临时切到这个即可，零依赖) -----
+# DBDriver: sqlite
+# DataSource: ./data/apipro.db
+
+# ============================================================
+# Redis 配置（缓存 + 定时刷新 + 聊天历史）
+# ============================================================
+# 本地默认 6399 端口（避免和系统 Redis 冲突）
+# 如果你的 Redis 在默认 6379 端口，把 Host 改成 127.0.0.1:6379 即可
 CacheRedis:
   Host: 127.0.0.1:6399
-  Type: node
+  Type: node            # 单机用 node；集群用 cluster
+  # Pass: ""            # 没密码留空或删掉；有密码填这里
 
+# ============================================================
+# JWT 配置（鉴权）
+# ============================================================
+# ⚠️ 生产环境必须改成 32 位以上的强随机字符串
 JwtSecret: "apipro-dev-secret-change-me-please-0123456789-abcdef"
-AccessTtl: 900s
-RefreshTtl: 604800s
+AccessTtl: 900s         # 访问令牌有效期 15 分钟
+RefreshTtl: 604800s     # 刷新令牌有效期 7 天
 
-# Cache TTLs (seconds)
-CacheMatchListTtl: 60
-CacheMatchDetailTtl: 90
-CacheRoomDetailTtl: 30
-CacheCommentatorTtl: 120
-CacheLiveTtl: 15
-CacheUserProfileTtl: 120
+# ============================================================
+# 缓存 TTL（秒）—— 命中缓存直接返回，过期后回源数据库
+# ============================================================
+CacheMatchListTtl: 60        # 比赛列表缓存 60 秒
+CacheMatchDetailTtl: 90      # 比赛详情缓存 90 秒
+CacheRoomDetailTtl: 30       # 房间详情缓存 30 秒
+CacheCommentatorTtl: 120     # 解说员缓存 120 秒
+CacheLiveTtl: 15             # 直播列表缓存 15 秒
+CacheUserProfileTtl: 120     # 用户资料缓存 120 秒
 
-# Scheduled refresh intervals (seconds)
-RefreshMatchListTtl: 60
-RefreshLiveTtl: 15
-RefreshCommentatorTtl: 120
+# ============================================================
+# 定时刷新周期（秒）—— 后台 goroutine 定时预热热点缓存
+# ============================================================
+RefreshMatchListTtl: 60      # 每 60 秒刷新比赛列表
+RefreshLiveTtl: 15           # 每 15 秒刷新直播列表
+RefreshCommentatorTtl: 120   # 每 120 秒刷新解说员
 
-# Chat
-ChatMaxMsgLen: 500
-ChatHistoryLim: 50
-ChatRatePerMin: 60
+# ============================================================
+# 聊天配置（WebSocket）
+# ============================================================
+ChatMaxMsgLen: 500       # 单条消息最大长度（字符）
+ChatHistoryLim: 50       # 进房时下发的最近历史消息条数
+ChatRatePerMin: 60       # 每用户每分钟最大发言条数（限流）
