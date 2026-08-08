@@ -1,7 +1,7 @@
 package main
 
 // Seed tool — populates the database with zbyy sample data.
-// Works with both MySQL and SQLite.
+// Works with both MySQL and SQLite (uses REPLACE INTO, supported by both).
 //
 // Usage:
 //   go run cmd/seed/main.go -config cmd/rpc/etc/apipro.yaml
@@ -79,7 +79,7 @@ func seedAll(ctx context.Context, db *sql.DB, driver string) {
         // live_types
         for _, lt := range liveTypes {
                 _, err := db.ExecContext(ctx,
-                        `INSERT OR REPLACE INTO live_types (code, name, icon, sort_order, status) VALUES (?,?,?,?,?)`,
+                        `REPLACE INTO live_types (code, name, icon, sort_order, status) VALUES (?,?,?,?,?)`,
                         lt[0], lt[1], lt[2], toInt(lt[3]), 1)
                 logx.Must(err)
         }
@@ -87,7 +87,7 @@ func seedAll(ctx context.Context, db *sql.DB, driver string) {
         // anchors
         for _, a := range anchors {
                 _, err := db.ExecContext(ctx,
-                        `INSERT OR REPLACE INTO anchors
+                        `REPLACE INTO anchors
                         (uid, nick_name, icon, cut_out_icon, intro, fans, follow, hot, room_num, detail, notice, live, created_at)
                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                         a[0], a[1], a[2], a[3], a[4], toInt64(a[5]), toInt64(a[6]), toInt64(a[7]),
@@ -100,7 +100,7 @@ func seedAll(ctx context.Context, db *sql.DB, driver string) {
                 streamJSON, _ := json.Marshal(r[7].([]string))
                 tagJSON, _ := json.Marshal(r[9].([]string))
                 _, err := db.ExecContext(ctx,
-                        `INSERT OR REPLACE INTO rooms
+                        `REPLACE INTO rooms
                         (room_num, title, cover, live, view_num, live_type, anchor_uid, stream_urls, notice, tags, cate_name, created_at)
                         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
                         r[0], r[1], r[2], toInt(r[3]), toInt64(r[4]), r[5], r[6],
@@ -115,7 +115,7 @@ func seedAll(ctx context.Context, db *sql.DB, driver string) {
                 dateKey := day.Format("20060102")
                 for _, m := range buildMatchesForDay(day, dateKey) {
                         _, err := db.ExecContext(ctx,
-                                `INSERT OR REPLACE INTO matches
+                                `REPLACE INTO matches
                                 (schedule_id, sub_cate_name, cate_name, match_time, match_date, host_name, host_icon,
                                  guest_name, guest_icon, venue, status, reservation_status, created_at)
                                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -136,7 +136,7 @@ func seedAll(ctx context.Context, db *sql.DB, driver string) {
                 }
                 for _, ma := range maLinks {
                         _, _ = db.ExecContext(ctx,
-                                `INSERT OR IGNORE INTO match_anchors (match_id, anchor_uid) VALUES (?,?)`,
+                                `REPLACE INTO match_anchors (match_id, anchor_uid) VALUES (?,?)`,
                                 ma.MatchID, ma.AnchorUID)
                 }
         }
@@ -153,7 +153,7 @@ func seedAll(ctx context.Context, db *sql.DB, driver string) {
         // demo user (password = md5Pwd("123456", 1))
         pwd := auth.Md5Pwd("123456", 1)
         _, err := db.ExecContext(ctx,
-                `INSERT OR REPLACE INTO users
+                `REPLACE INTO users
                 (uid, login_name, nick_name, phone, country_code, password, pwd_type, grow, score, level, avatar, is_user, created_at, updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                 "U0001", "demo", "demo用户", "13800138000", "+86", pwd, 1, 120, 500, 3,
