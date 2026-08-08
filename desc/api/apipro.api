@@ -1,321 +1,335 @@
 syntax = "v1"
 
 info (
-	title:   "apipro"
-	desc:    "Standalone go-zero JSON-RPC style API gateway for the zbyy live-streaming data model. All read endpoints are Redis-cached with scheduled refresh."
-	author:  "apipro"
-	version: "v1"
+        title:   "apipro"
+        desc:    "Standalone go-zero JSON-RPC style API gateway for the zbyy live-streaming data model. All read endpoints are Redis-cached with scheduled refresh."
+        author:  "apipro"
+        version: "v1"
 )
 
 // ===== Auth =====
 type (
-	RegisterReq {
-		LoginName   string `json:"loginName"`
-		Phone       string `json:"phone"`
-		CountryCode string `json:"countryCode"`
-		Password    string `json:"password"` // client-encrypted md5
-		SmsCode     string `json:"smsCode"`
-		NickName    string `json:"nickName,optional"`
-		PwdType     int32  `json:"pwdType,optional"`
-	}
-	LoginReq {
-		Phone       string `json:"phone"`
-		CountryCode string `json:"countryCode"`
-		Password    string `json:"password"` // client-encrypted md5
-		PwdType     int32  `json:"pwdType,optional"`
-	}
-	TokenResp {
-		AccessToken  string `json:"accessToken"`
-		RefreshToken string `json:"refreshToken"`
-		ExpiresAt    int64  `json:"expiresAt"`
-	}
-	RefreshReq {
-		RefreshToken string `json:"refreshToken"`
-	}
+        RegisterReq {
+                LoginName   string `json:"loginName"`
+                Phone       string `json:"phone"`
+                CountryCode string `json:"countryCode"`
+                Password    string `json:"password"` // client-encrypted md5
+                SmsCode     string `json:"smsCode"`
+                NickName    string `json:"nickName,optional"`
+                PwdType     int32  `json:"pwdType,optional"`
+        }
+        LoginReq {
+                Phone       string `json:"phone"`
+                CountryCode string `json:"countryCode"`
+                Password    string `json:"password"` // client-encrypted md5
+                PwdType     int32  `json:"pwdType,optional"`
+        }
+        TokenResp {
+                AccessToken  string `json:"accessToken"`
+                RefreshToken string `json:"refreshToken"`
+                ExpiresAt    int64  `json:"expiresAt"`
+        }
+        RefreshReq {
+                RefreshToken string `json:"refreshToken"`
+        }
 )
 
 @server (
-	group:  auth
-	prefix: /api/v1/auth
+        group:  auth
+        prefix: /api/v1/auth
 )
 service apipro {
-	@handler register
-	post /register (RegisterReq) returns (TokenResp)
+        @handler register
+        post /register (RegisterReq) returns (TokenResp)
 
-	@handler login
-	post /login (LoginReq) returns (TokenResp)
+        @handler login
+        post /login (LoginReq) returns (TokenResp)
 
-	@handler guest
-	post /guest returns (TokenResp)
+        @handler guest
+        post /guest returns (TokenResp)
 
-	@handler refresh
-	post /refresh (RefreshReq) returns (TokenResp)
+        @handler refresh
+        post /refresh (RefreshReq) returns (TokenResp)
 }
 
 // ===== User (authed) =====
 type (
-	UserProfileResp {
-		Uid         string `json:"uid"`
-		LoginName   string `json:"loginName"`
-		NickName    string `json:"nickName"`
-		Phone       string `json:"phone"`
-		CountryCode string `json:"countryCode"`
-		Grow        int64  `json:"grow"`
-		Score       int64  `json:"score"`
-		Level       int32  `json:"level"`
-		Avatar      string `json:"avatar"`
-		IsUser      int32  `json:"isUser"`
-		CreatedAt   int64  `json:"createdAt"`
-	}
+        UserProfileResp {
+                Uid         string `json:"uid"`
+                LoginName   string `json:"loginName"`
+                NickName    string `json:"nickName"`
+                Phone       string `json:"phone"`
+                CountryCode string `json:"countryCode"`
+                Grow        int64  `json:"grow"`
+                Score       int64  `json:"score"`
+                Level       int32  `json:"level"`
+                Avatar      string `json:"avatar"`
+                IsUser      int32  `json:"isUser"`
+                CreatedAt   int64  `json:"createdAt"`
+        }
 )
 
 @server (
-	group:  user
-	prefix: /api/v1/user
-	jwt:    Auth
+        group:  user
+        prefix: /api/v1/user
+        jwt:    Auth
 )
 service apipro {
-	@handler profile
-	get /profile returns (UserProfileResp)
+        @handler profile
+        get /profile returns (UserProfileResp)
 }
 
 // ===== Match =====
 type (
-	PageReq {
-		Page     int32 `form:"page,default=1"`
-		PageSize int32 `form:"pageSize,default=20"`
-	}
-	DateReq {
-		Date     string `form:"date,optional"`
-		Page     int32  `form:"page,default=1"`
-		PageSize int32  `form:"pageSize,default=20"`
-	}
-	IdReq {
-		Id string `form:"id"`
-	}
-	CateReq {
-		CateName string `form:"cateName"`
-		Page     int32  `form:"page,default=1"`
-		PageSize int32  `form:"pageSize,default=20"`
-	}
-	AnchorJson {
-		Uid     string `json:"uid"`
-		RoomNum string `json:"roomNum"`
-		Detail  string `json:"detail"`
-		Notice  string `json:"notice"`
-		Live    bool   `json:"live"`
-	}
-	CommentatorJson {
-		Uid        string     `json:"uid"`
-		NickName   string     `json:"nickName"`
-		Icon       string     `json:"icon"`
-		CutOutIcon string     `json:"cutOutIcon"`
-		Intro      string     `json:"intro"`
-		Fans       int64      `json:"fans"`
-		Follow     int64      `json:"follow"`
-		Hot        int64      `json:"hot"`
-		Anchor     AnchorJson `json:"anchor"`
-	}
-	MatchItemJson {
-		ScheduleId        string            `json:"scheduleId"`
-		SubCateName       string            `json:"subCateName"`
-		CateName          string            `json:"cateName"`
-		MatchTime         string            `json:"matchTime"`
-		HostName          string            `json:"hostName"`
-		HostIcon          string            `json:"hostIcon"`
-		GuestName         string            `json:"guestName"`
-		GuestIcon         string            `json:"guestIcon"`
-		Venue             string            `json:"venue"`
-		Status            string            `json:"status"`
-		ReservationStatus int32             `json:"reservationStatus"`
-		Anchors           []CommentatorJson `json:"anchors"`
-	}
-	MatchListResp {
-		List  []MatchItemJson `json:"list"`
-		Total int64           `json:"total"`
-		Date  string          `json:"date"`
-	}
-	MatchRecommendResp {
-		List []MatchItemJson `json:"list"`
-	}
-	MatchDetailResp {
-		Match MatchItemJson `json:"match"`
-	}
-	CateListResp {
-		CateNames []string `json:"cateNames"`
-	}
+        PageReq {
+                Page     int32 `form:"page,default=1"`
+                PageSize int32 `form:"pageSize,default=20"`
+        }
+        DateReq {
+                Date     string `form:"date,optional"`
+                Page     int32  `form:"page,default=1"`
+                PageSize int32  `form:"pageSize,default=20"`
+        }
+        IdReq {
+                Id string `form:"id"`
+        }
+        CateReq {
+                CateName string `form:"cateName"`
+                Page     int32  `form:"page,default=1"`
+                PageSize int32  `form:"pageSize,default=20"`
+        }
+        AnchorJson {
+                Uid     string `json:"uid"`
+                RoomNum string `json:"roomNum"`
+                Detail  string `json:"detail"`
+                Notice  string `json:"notice"`
+                Live    bool   `json:"live"`
+        }
+        CommentatorJson {
+                Uid        string     `json:"uid"`
+                NickName   string     `json:"nickName"`
+                Icon       string     `json:"icon"`
+                CutOutIcon string     `json:"cutOutIcon"`
+                Intro      string     `json:"intro"`
+                Fans       int64      `json:"fans"`
+                Follow     int64      `json:"follow"`
+                Hot        int64      `json:"hot"`
+                Anchor     AnchorJson `json:"anchor"`
+        }
+        MatchItemJson {
+                ScheduleId        string            `json:"scheduleId"`
+                SubCateName       string            `json:"subCateName"`
+                CateName          string            `json:"cateName"`
+                MatchTime         int64             `json:"matchTime"`
+                HostName          string            `json:"hostName"`
+                HostIcon          string            `json:"hostIcon"`
+                GuestName         string            `json:"guestName"`
+                GuestIcon         string            `json:"guestIcon"`
+                Venue             string            `json:"venue"`
+                Status            string            `json:"status"`
+                ReservationStatus int32             `json:"reservationStatus"`
+                Anchors           []CommentatorJson `json:"anchors"`
+                CategoryId        int32             `json:"categoryId"`
+                CategoryName      string            `json:"categoryName"`
+                CategoryIcon      string            `json:"categoryIcon"`
+                MatchStatusDesc   string            `json:"matchStatusDesc"`
+                HostScore         int32             `json:"hostScore"`
+                GuestScore        int32             `json:"guestScore"`
+        }
+        MatchListResp {
+                List  []MatchItemJson `json:"list"`
+                Total int64           `json:"total"`
+                Date  string          `json:"date"`
+        }
+        MatchRecommendResp {
+                List []MatchItemJson `json:"list"`
+        }
+        MatchDetailResp {
+                Match MatchItemJson `json:"match"`
+        }
+        CateListResp {
+                CateNames []string `json:"cateNames"`
+        }
 )
 
 @server (
-	group:  match
-	prefix: /api/v1/match
+        group:  match
+        prefix: /api/v1/match
 )
 service apipro {
-	@handler listByDate
-	get /list (DateReq) returns (MatchListResp)
+        @handler listByDate
+        get /list (DateReq) returns (MatchListResp)
 
-	@handler recommend
-	get /recommend returns (MatchRecommendResp)
+        @handler recommend
+        get /recommend returns (MatchRecommendResp)
 
-	@handler detail
-	get /detail (IdReq) returns (MatchDetailResp)
+        @handler detail
+        get /detail (IdReq) returns (MatchDetailResp)
 
-	@handler cateList
-	get /cates returns (CateListResp)
+        @handler cateList
+        get /cates returns (CateListResp)
 
-	@handler listByCate
-	get /cate (CateReq) returns (MatchListResp)
+        @handler listByCate
+        get /cate (CateReq) returns (MatchListResp)
 }
 
 // ===== Room =====
 type (
-	RoomNumReq {
-		RoomNum string `form:"roomNum"`
-	}
-	RoomDetailJson {
-		RoomNum    string          `json:"roomNum"`
-		Title      string          `json:"title"`
-		Cover      string          `json:"cover"`
-		Live       bool            `json:"live"`
-		ViewNum    int64           `json:"viewNum"`
-		LiveType   string          `json:"liveType"`
-		Anchor     CommentatorJson `json:"anchor"`
-		StreamUrls []string        `json:"streamUrls"`
-		Notice     string          `json:"notice"`
-		Tags       []string        `json:"tags"`
-	}
-	RoomDetailResp {
-		Room RoomDetailJson `json:"room"`
-	}
-	RoomScheduleResp {
-		List []MatchItemJson `json:"list"`
-	}
-	RoomRankItemJson {
-		Uid      string `json:"uid"`
-		NickName string `json:"nickName"`
-		Icon     string `json:"icon"`
-		Score    int64  `json:"score"`
-		Rank     int32  `json:"rank"`
-	}
-	RoomRankResp {
-		List []RoomRankItemJson `json:"list"`
-	}
+        RoomNumReq {
+                RoomNum string `form:"roomNum"`
+        }
+        RoomDetailJson {
+                RoomNum    string          `json:"roomNum"`
+                Title      string          `json:"title"`
+                Cover      string          `json:"cover"`
+                Live       bool            `json:"live"`
+                ViewNum    int64           `json:"viewNum"`
+                LiveType   string          `json:"liveType"`
+                Anchor     CommentatorJson `json:"anchor"`
+                StreamUrls []string        `json:"streamUrls"`
+                Notice     string          `json:"notice"`
+                Tags       []string        `json:"tags"`
+        }
+        RoomDetailResp {
+                Room RoomDetailJson `json:"room"`
+        }
+        RoomScheduleResp {
+                List []MatchItemJson `json:"list"`
+        }
+        RoomRankItemJson {
+                Uid      string `json:"uid"`
+                NickName string `json:"nickName"`
+                Icon     string `json:"icon"`
+                Score    int64  `json:"score"`
+                Rank     int32  `json:"rank"`
+        }
+        RoomRankResp {
+                List []RoomRankItemJson `json:"list"`
+        }
 )
 
 @server (
-	group:  room
-	prefix: /api/v1/room
+        group:  room
+        prefix: /api/v1/room
 )
 service apipro {
-	@handler detail
-	get /detail (RoomNumReq) returns (RoomDetailResp)
+        @handler detail
+        get /detail (RoomNumReq) returns (RoomDetailResp)
 
-	@handler schedule
-	get /schedule (RoomNumReq) returns (RoomScheduleResp)
+        @handler schedule
+        get /schedule (RoomNumReq) returns (RoomScheduleResp)
 
-	@handler rank
-	get /rank (RoomNumReq) returns (RoomRankResp)
+        @handler rank
+        get /rank (RoomNumReq) returns (RoomRankResp)
 }
 
 // ===== Commentator =====
 @server (
-	group:  commentator
-	prefix: /api/v1/commentator
+        group:  commentator
+        prefix: /api/v1/commentator
 )
 service apipro {
-	@handler list
-	get /list (PageReq) returns (CommentatorListResp)
+        @handler list
+        get /list (PageReq) returns (CommentatorListResp)
 
-	@handler detail
-	get /detail (IdReq) returns (CommentatorDetailResp)
+        @handler detail
+        get /detail (IdReq) returns (CommentatorDetailResp)
 }
 
 type (
-	CommentatorListResp {
-		List  []CommentatorJson `json:"list"`
-		Total int64             `json:"total"`
-	}
-	CommentatorDetailResp {
-		Commentator CommentatorJson `json:"commentator"`
-	}
+        CommentatorListResp {
+                List  []CommentatorJson `json:"list"`
+                Total int64             `json:"total"`
+        }
+        CommentatorDetailResp {
+                Commentator CommentatorJson `json:"commentator"`
+        }
 )
 
 // ===== Live =====
 type (
-	LiveRoomJson {
-		RoomNum  string          `json:"roomNum"`
-		Title    string          `json:"title"`
-		Cover    string          `json:"cover"`
-		Anchor   CommentatorJson `json:"anchor"`
-		ViewNum  int64           `json:"viewNum"`
-		LiveType string          `json:"liveType"`
-		CateName string          `json:"cateName"`
-	}
-	LiveListResp {
-		List  []LiveRoomJson `json:"list"`
-		Total int64          `json:"total"`
-	}
-	LiveTypeJson {
-		Code string `json:"code"`
-		Name string `json:"name"`
-		Icon string `json:"icon"`
-	}
-	LiveTypeListResp {
-		List []LiveTypeJson `json:"list"`
-	}
-	HotAnchorResp {
-		List []CommentatorJson `json:"list"`
-	}
+        LiveRoomJson {
+                RoomNum  string          `json:"roomNum"`
+                Title    string          `json:"title"`
+                Cover    string          `json:"cover"`
+                Anchor   CommentatorJson `json:"anchor"`
+                ViewNum  int64           `json:"viewNum"`
+                LiveType string          `json:"liveType"`
+                CateName string          `json:"cateName"`
+                ViewCount            int64  `json:"viewCount"`
+                CutOutCustomCoverUrl string `json:"cutOutCustomCoverUrl"`
+                MarkType             int32  `json:"markType"`
+                LiveStatus           int32  `json:"liveStatus"`
+        }
+        LiveListResp {
+                List      []LiveRoomJson `json:"list"`
+                Total     int64          `json:"total"`
+                All       []LiveRoomJson `json:"0"`
+                Football  []LiveRoomJson `json:"1"`
+                Basketball []LiveRoomJson `json:"2"`
+                Hot       []LiveRoomJson `json:"hot"`
+        }
+        LiveTypeJson {
+                Code string `json:"code"`
+                Name string `json:"name"`
+                Icon string `json:"icon"`
+        }
+        LiveTypeListResp {
+                List []LiveTypeJson `json:"list"`
+        }
+        HotAnchorResp {
+                List []CommentatorJson `json:"list"`
+        }
 )
 
 @server (
-	group:  live
-	prefix: /api/v1/live
+        group:  live
+        prefix: /api/v1/live
 )
 service apipro {
-	@handler list
-	get /list (PageReq) returns (LiveListResp)
+        @handler list
+        get /list (PageReq) returns (LiveListResp)
 
-	@handler types
-	get /types returns (LiveTypeListResp)
+        @handler types
+        get /types returns (LiveTypeListResp)
 
-	@handler hotAnchor
-	get /hot returns (HotAnchorResp)
+        @handler hotAnchor
+        get /hot returns (HotAnchorResp)
 }
 
 // ===== Cache admin (authed) =====
 type (
-	CacheRefreshReq {
-		Family string `json:"family"`
-	}
-	CacheRefreshResp {
-		Ok      bool   `json:"ok"`
-		Message string `json:"message"`
-	}
-	FamilyStatJson {
-		Family string `json:"family"`
-		Keys   int64  `json:"keys"`
-		Hits   int64  `json:"hits"`
-		Misses int64  `json:"misses"`
-	}
-	CacheStatsResp {
-		Hits     int64            `json:"hits"`
-		Misses   int64            `json:"misses"`
-		Keys     int64            `json:"keys"`
-		Families []FamilyStatJson `json:"families"`
-	}
+        CacheRefreshReq {
+                Family string `json:"family"`
+        }
+        CacheRefreshResp {
+                Ok      bool   `json:"ok"`
+                Message string `json:"message"`
+        }
+        FamilyStatJson {
+                Family string `json:"family"`
+                Keys   int64  `json:"keys"`
+                Hits   int64  `json:"hits"`
+                Misses int64  `json:"misses"`
+        }
+        CacheStatsResp {
+                Hits     int64            `json:"hits"`
+                Misses   int64            `json:"misses"`
+                Keys     int64            `json:"keys"`
+                Families []FamilyStatJson `json:"families"`
+        }
 )
 
 @server (
-	group:  admin
-	prefix: /api/v1/admin/cache
-	jwt:    Auth
+        group:  admin
+        prefix: /api/v1/admin/cache
+        jwt:    Auth
 )
 service apipro {
-	@handler refresh
-	post /refresh (CacheRefreshReq) returns (CacheRefreshResp)
+        @handler refresh
+        post /refresh (CacheRefreshReq) returns (CacheRefreshResp)
 
-	@handler stats
-	get /stats returns (CacheStatsResp)
+        @handler stats
+        get /stats returns (CacheStatsResp)
 }
 

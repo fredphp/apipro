@@ -35,7 +35,7 @@ type MatchItem struct {
         ScheduleId        string         `json:"scheduleId"`
         SubCateName       string         `json:"subCateName"`
         CateName          string         `json:"cateName"`
-        MatchTime         string         `json:"matchTime"`
+        MatchTime         int64          `json:"matchTime"` // ms timestamp
         HostName          string         `json:"hostName"`
         HostIcon          string         `json:"hostIcon"`
         GuestName         string         `json:"guestName"`
@@ -44,6 +44,12 @@ type MatchItem struct {
         Status            string         `json:"status"`
         ReservationStatus int32          `json:"reservationStatus"`
         Anchors           []Commentator  `json:"anchors"`
+        CategoryId        int32          `json:"categoryId"`
+        CategoryName      string         `json:"categoryName"`
+        CategoryIcon      string         `json:"categoryIcon"`
+        MatchStatusDesc   string         `json:"matchStatusDesc"`
+        HostScore         int32          `json:"hostScore"`
+        GuestScore        int32          `json:"guestScore"`
 }
 
 type RoomDetail struct {
@@ -60,13 +66,17 @@ type RoomDetail struct {
 }
 
 type LiveRoom struct {
-        RoomNum  string       `json:"roomNum"`
-        Title    string       `json:"title"`
-        Cover    string       `json:"cover"`
-        Anchor   Commentator  `json:"anchor"`
-        ViewNum  int64        `json:"viewNum"`
-        LiveType string       `json:"liveType"`
-        CateName string       `json:"cateName"`
+        RoomNum              string       `json:"roomNum"`
+        Title                string       `json:"title"`
+        Cover                string       `json:"cover"`
+        Anchor               Commentator  `json:"anchor"`
+        ViewNum              int64        `json:"viewNum"`
+        LiveType             string       `json:"liveType"`
+        CateName             string       `json:"cateName"`
+        ViewCount            int64        `json:"viewCount"`
+        CutOutCustomCoverUrl string       `json:"cutOutCustomCoverUrl"`
+        MarkType             int32        `json:"markType"`
+        LiveStatus           int32        `json:"liveStatus"`
 }
 
 type LiveType struct {
@@ -160,7 +170,7 @@ func seed() {
                         var list []MatchItem
                         list = append(list, MatchItem{
                                 ScheduleId: dateKey + "01", SubCateName: "英超", CateName: "足球",
-                                MatchTime: day.Add(20*time.Hour).Format("2006-01-02 15:04:05"),
+                                MatchTime: day.Add(20*time.Hour).UnixMilli(),
                                 HostName: "曼联", HostIcon: "https://cdn.zbyy.example/team/man.png",
                                 GuestName: "利物浦", GuestIcon: "https://cdn.zbyy.example/team/liv.png",
                                 Venue: "老特拉福德", Status: matchStatus(day.Add(20 * time.Hour)),
@@ -168,7 +178,7 @@ func seed() {
                         })
                         list = append(list, MatchItem{
                                 ScheduleId: dateKey + "02", SubCateName: "NBA", CateName: "篮球",
-                                MatchTime: day.Add(11*time.Hour).Format("2006-01-02 15:04:05"),
+                                MatchTime: day.Add(11*time.Hour).UnixMilli(),
                                 HostName: "湖人", HostIcon: "https://cdn.zbyy.example/team/lal.png",
                                 GuestName: "勇士", GuestIcon: "https://cdn.zbyy.example/team/gsw.png",
                                 Venue: "Crypto.com Arena", Status: matchStatus(day.Add(11 * time.Hour)),
@@ -177,7 +187,7 @@ func seed() {
                         if d%2 == 0 {
                                 list = append(list, MatchItem{
                                         ScheduleId: dateKey + "03", SubCateName: "西甲", CateName: "足球",
-                                        MatchTime: day.Add(23 * time.Hour).Format("2006-01-02 15:04:05"),
+                                        MatchTime: day.Add(23 * time.Hour).UnixMilli(),
                                         HostName: "皇马", HostIcon: "https://cdn.zbyy.example/team/rma.png",
                                         GuestName: "巴萨", GuestIcon: "https://cdn.zbyy.example/team/bar.png",
                                         Venue: "伯纳乌", Status: matchStatus(day.Add(23 * time.Hour)),
@@ -187,7 +197,7 @@ func seed() {
                         if d == 1 {
                                 list = append(list, MatchItem{
                                         ScheduleId: dateKey + "04", SubCateName: "德甲", CateName: "足球",
-                                        MatchTime: day.Add(22 * time.Hour).Format("2006-01-02 15:04:05"),
+                                        MatchTime: day.Add(22 * time.Hour).UnixMilli(),
                                         HostName: "拜仁", HostIcon: "https://cdn.zbyy.example/team/bay.png",
                                         GuestName: "多特", GuestIcon: "https://cdn.zbyy.example/team/bvb.png",
                                         Venue: "安联球场", Status: matchStatus(day.Add(22 * time.Hour)),

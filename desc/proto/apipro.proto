@@ -111,7 +111,7 @@ message MatchItem {
   string scheduleId = 1;
   string subCateName = 2;
   string cateName = 3;
-  string matchTime = 4;
+  int64 matchTime = 4; // ms timestamp (zbyy client uses Number(matchTime))
   string hostName = 5;
   string hostIcon = 6;
   string guestName = 7;
@@ -120,6 +120,13 @@ message MatchItem {
   string status = 10; // not_started | living | over
   int32 reservationStatus = 11; // 0 unknown,1 reserved,2 not reserved
   repeated Commentator anchors = 12;
+  // zbyy-compatible fields (added for client compatibility, do not remove existing ones)
+  int32 categoryId = 13; // 1=football, 2=basketball, -1=other
+  string categoryName = 14;
+  string categoryIcon = 15;
+  string matchStatusDesc = 16;
+  int32 hostScore = 17;
+  int32 guestScore = 18;
 }
 
 message MatchListResp {
@@ -193,11 +200,21 @@ message LiveRoom {
   int64 viewNum = 5;
   string liveType = 6;
   string cateName = 7;
+  // zbyy-compatible fields (added for client compatibility)
+  int64 viewCount = 8; // same as viewNum; zbyy client reads item.viewCount
+  string cutOutCustomCoverUrl = 9;
+  int32 markType = 10; // 1=official, 2=recommend, 3=hot
+  int32 liveStatus = 11; // 1=live
 }
 
 message LiveListResp {
   repeated LiveRoom list = 1;
   int64 total = 2;
+  // zbyy-compatible groups: client accesses res[0]/res[1]/res[2]/res.hot
+  repeated LiveRoom all = 3; // json:"0"
+  repeated LiveRoom football = 4; // json:"1"
+  repeated LiveRoom basketball = 5; // json:"2"
+  repeated LiveRoom hot = 6; // json:"hot"
 }
 
 message LiveType {

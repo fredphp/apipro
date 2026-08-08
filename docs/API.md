@@ -223,7 +223,7 @@ curl 'http://127.0.0.1:3100/api/v1/match/list?date=20250808&page=1&pageSize=20'
       "scheduleId": "2025080801",
       "subCateName": "英超",
       "cateName": "足球",
-      "matchTime": "2025-08-08 20:00:00",
+      "matchTime": 1723108800000,
       "hostName": "曼联",
       "hostIcon": "https://cdn.zbyy.example/team/man.png",
       "guestName": "利物浦",
@@ -249,7 +249,13 @@ curl 'http://127.0.0.1:3100/api/v1/match/list?date=20250808&page=1&pageSize=20'
             "live": true
           }
         }
-      ]
+      ],
+      "categoryId": 1,
+      "categoryName": "足球",
+      "categoryIcon": "",
+      "matchStatusDesc": "今日直播",
+      "hostScore": 0,
+      "guestScore": 0
     }
   ],
   "total": 3,
@@ -496,23 +502,33 @@ GET /api/v1/live/list
 | page | int32 | 否 | 1 | 页码 |
 | pageSize | int32 | 否 | 20 | 每页条数 |
 
-**响应**：
+**响应**（zbyy 兼容分组结构 + 保留 list/total）：
 ```json
 {
-  "list": [
+  "0": [
     {
       "roomNum": "1001",
       "title": "英超焦点战: 曼联 vs 利物浦",
       "cover": "https://cdn.zbyy.example/cover/1001.jpg",
-      "anchor": { /* CommentatorJson */ },
+      "anchor": { "uid": "A1001", "nickName": "飞鱼解说", "icon": "..." },
       "viewNum": 38211,
       "liveType": "football",
-      "cateName": "英超"
+      "cateName": "英超",
+      "viewCount": 38211,
+      "cutOutCustomCoverUrl": "https://cdn.zbyy.example/cover/1001.jpg",
+      "markType": 0,
+      "liveStatus": 1
     }
   ],
+  "1": [ /* 足球直播间 */ ],
+  "2": [ /* 篮球直播间 */ ],
+  "hot": [ /* 热门直播间（同 0，按热度） */ ],
+  "list": [ /* 同 0，分页后的列表 */ ],
   "total": 3
 }
 ```
+
+> **zbyy 客户端兼容说明**：客户端通过 `res[0]`/`res[1]`/`res[2]`/`res.hot` 访问分组，`res.list`/`res.total` 为保留字段（旧调用方兼容）。
 
 ### 7.2 直播分类
 

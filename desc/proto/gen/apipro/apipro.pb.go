@@ -1016,7 +1016,7 @@ type MatchItem struct {
 	ScheduleId        string                 `protobuf:"bytes,1,opt,name=scheduleId,proto3" json:"scheduleId,omitempty"`
 	SubCateName       string                 `protobuf:"bytes,2,opt,name=subCateName,proto3" json:"subCateName,omitempty"`
 	CateName          string                 `protobuf:"bytes,3,opt,name=cateName,proto3" json:"cateName,omitempty"`
-	MatchTime         string                 `protobuf:"bytes,4,opt,name=matchTime,proto3" json:"matchTime,omitempty"`
+	MatchTime         int64                  `protobuf:"varint,4,opt,name=matchTime,proto3" json:"matchTime,omitempty"` // ms timestamp (zbyy client uses Number(matchTime))
 	HostName          string                 `protobuf:"bytes,5,opt,name=hostName,proto3" json:"hostName,omitempty"`
 	HostIcon          string                 `protobuf:"bytes,6,opt,name=hostIcon,proto3" json:"hostIcon,omitempty"`
 	GuestName         string                 `protobuf:"bytes,7,opt,name=guestName,proto3" json:"guestName,omitempty"`
@@ -1025,8 +1025,15 @@ type MatchItem struct {
 	Status            string                 `protobuf:"bytes,10,opt,name=status,proto3" json:"status,omitempty"`                        // not_started | living | over
 	ReservationStatus int32                  `protobuf:"varint,11,opt,name=reservationStatus,proto3" json:"reservationStatus,omitempty"` // 0 unknown,1 reserved,2 not reserved
 	Anchors           []*Commentator         `protobuf:"bytes,12,rep,name=anchors,proto3" json:"anchors,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// zbyy-compatible fields (added for client compatibility, do not remove existing ones)
+	CategoryId      int32  `protobuf:"varint,13,opt,name=categoryId,proto3" json:"categoryId,omitempty"` // 1=football, 2=basketball, -1=other
+	CategoryName    string `protobuf:"bytes,14,opt,name=categoryName,proto3" json:"categoryName,omitempty"`
+	CategoryIcon    string `protobuf:"bytes,15,opt,name=categoryIcon,proto3" json:"categoryIcon,omitempty"`
+	MatchStatusDesc string `protobuf:"bytes,16,opt,name=matchStatusDesc,proto3" json:"matchStatusDesc,omitempty"`
+	HostScore       int32  `protobuf:"varint,17,opt,name=hostScore,proto3" json:"hostScore,omitempty"`
+	GuestScore      int32  `protobuf:"varint,18,opt,name=guestScore,proto3" json:"guestScore,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *MatchItem) Reset() {
@@ -1080,11 +1087,11 @@ func (x *MatchItem) GetCateName() string {
 	return ""
 }
 
-func (x *MatchItem) GetMatchTime() string {
+func (x *MatchItem) GetMatchTime() int64 {
 	if x != nil {
 		return x.MatchTime
 	}
-	return ""
+	return 0
 }
 
 func (x *MatchItem) GetHostName() string {
@@ -1141,6 +1148,48 @@ func (x *MatchItem) GetAnchors() []*Commentator {
 		return x.Anchors
 	}
 	return nil
+}
+
+func (x *MatchItem) GetCategoryId() int32 {
+	if x != nil {
+		return x.CategoryId
+	}
+	return 0
+}
+
+func (x *MatchItem) GetCategoryName() string {
+	if x != nil {
+		return x.CategoryName
+	}
+	return ""
+}
+
+func (x *MatchItem) GetCategoryIcon() string {
+	if x != nil {
+		return x.CategoryIcon
+	}
+	return ""
+}
+
+func (x *MatchItem) GetMatchStatusDesc() string {
+	if x != nil {
+		return x.MatchStatusDesc
+	}
+	return ""
+}
+
+func (x *MatchItem) GetHostScore() int32 {
+	if x != nil {
+		return x.HostScore
+	}
+	return 0
+}
+
+func (x *MatchItem) GetGuestScore() int32 {
+	if x != nil {
+		return x.GuestScore
+	}
+	return 0
 }
 
 type MatchListResp struct {
@@ -1766,16 +1815,21 @@ func (x *RoomRankResp) GetList() []*RoomRankItem {
 
 // ===== Live =====
 type LiveRoom struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RoomNum       string                 `protobuf:"bytes,1,opt,name=roomNum,proto3" json:"roomNum,omitempty"`
-	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Cover         string                 `protobuf:"bytes,3,opt,name=cover,proto3" json:"cover,omitempty"`
-	Anchor        *Commentator           `protobuf:"bytes,4,opt,name=anchor,proto3" json:"anchor,omitempty"`
-	ViewNum       int64                  `protobuf:"varint,5,opt,name=viewNum,proto3" json:"viewNum,omitempty"`
-	LiveType      string                 `protobuf:"bytes,6,opt,name=liveType,proto3" json:"liveType,omitempty"`
-	CateName      string                 `protobuf:"bytes,7,opt,name=cateName,proto3" json:"cateName,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	RoomNum  string                 `protobuf:"bytes,1,opt,name=roomNum,proto3" json:"roomNum,omitempty"`
+	Title    string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Cover    string                 `protobuf:"bytes,3,opt,name=cover,proto3" json:"cover,omitempty"`
+	Anchor   *Commentator           `protobuf:"bytes,4,opt,name=anchor,proto3" json:"anchor,omitempty"`
+	ViewNum  int64                  `protobuf:"varint,5,opt,name=viewNum,proto3" json:"viewNum,omitempty"`
+	LiveType string                 `protobuf:"bytes,6,opt,name=liveType,proto3" json:"liveType,omitempty"`
+	CateName string                 `protobuf:"bytes,7,opt,name=cateName,proto3" json:"cateName,omitempty"`
+	// zbyy-compatible fields (added for client compatibility)
+	ViewCount            int64  `protobuf:"varint,8,opt,name=viewCount,proto3" json:"viewCount,omitempty"` // same as viewNum; zbyy client reads item.viewCount
+	CutOutCustomCoverUrl string `protobuf:"bytes,9,opt,name=cutOutCustomCoverUrl,proto3" json:"cutOutCustomCoverUrl,omitempty"`
+	MarkType             int32  `protobuf:"varint,10,opt,name=markType,proto3" json:"markType,omitempty"`     // 1=official, 2=recommend, 3=hot
+	LiveStatus           int32  `protobuf:"varint,11,opt,name=liveStatus,proto3" json:"liveStatus,omitempty"` // 1=live
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *LiveRoom) Reset() {
@@ -1857,10 +1911,43 @@ func (x *LiveRoom) GetCateName() string {
 	return ""
 }
 
+func (x *LiveRoom) GetViewCount() int64 {
+	if x != nil {
+		return x.ViewCount
+	}
+	return 0
+}
+
+func (x *LiveRoom) GetCutOutCustomCoverUrl() string {
+	if x != nil {
+		return x.CutOutCustomCoverUrl
+	}
+	return ""
+}
+
+func (x *LiveRoom) GetMarkType() int32 {
+	if x != nil {
+		return x.MarkType
+	}
+	return 0
+}
+
+func (x *LiveRoom) GetLiveStatus() int32 {
+	if x != nil {
+		return x.LiveStatus
+	}
+	return 0
+}
+
 type LiveListResp struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	List          []*LiveRoom            `protobuf:"bytes,1,rep,name=list,proto3" json:"list,omitempty"`
-	Total         int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	List  []*LiveRoom            `protobuf:"bytes,1,rep,name=list,proto3" json:"list,omitempty"`
+	Total int64                  `protobuf:"varint,2,opt,name=total,proto3" json:"total,omitempty"`
+	// zbyy-compatible groups: client accesses res[0]/res[1]/res[2]/res.hot
+	All           []*LiveRoom `protobuf:"bytes,3,rep,name=all,proto3" json:"all,omitempty"`               // json:"0"
+	Football      []*LiveRoom `protobuf:"bytes,4,rep,name=football,proto3" json:"football,omitempty"`     // json:"1"
+	Basketball    []*LiveRoom `protobuf:"bytes,5,rep,name=basketball,proto3" json:"basketball,omitempty"` // json:"2"
+	Hot           []*LiveRoom `protobuf:"bytes,6,rep,name=hot,proto3" json:"hot,omitempty"`               // json:"hot"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1907,6 +1994,34 @@ func (x *LiveListResp) GetTotal() int64 {
 		return x.Total
 	}
 	return 0
+}
+
+func (x *LiveListResp) GetAll() []*LiveRoom {
+	if x != nil {
+		return x.All
+	}
+	return nil
+}
+
+func (x *LiveListResp) GetFootball() []*LiveRoom {
+	if x != nil {
+		return x.Football
+	}
+	return nil
+}
+
+func (x *LiveListResp) GetBasketball() []*LiveRoom {
+	if x != nil {
+		return x.Basketball
+	}
+	return nil
+}
+
+func (x *LiveListResp) GetHot() []*LiveRoom {
+	if x != nil {
+		return x.Hot
+	}
+	return nil
 }
 
 type LiveType struct {
@@ -2366,14 +2481,14 @@ const file_apipro_proto_rawDesc = "" +
 	"\x04list\x18\x01 \x03(\v2\x13.apipro.CommentatorR\x04list\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\x03R\x05total\"N\n" +
 	"\x15CommentatorDetailResp\x125\n" +
-	"\vcommentator\x18\x01 \x01(\v2\x13.apipro.CommentatorR\vcommentator\"\x86\x03\n" +
+	"\vcommentator\x18\x01 \x01(\v2\x13.apipro.CommentatorR\vcommentator\"\xd6\x04\n" +
 	"\tMatchItem\x12\x1e\n" +
 	"\n" +
 	"scheduleId\x18\x01 \x01(\tR\n" +
 	"scheduleId\x12 \n" +
 	"\vsubCateName\x18\x02 \x01(\tR\vsubCateName\x12\x1a\n" +
 	"\bcateName\x18\x03 \x01(\tR\bcateName\x12\x1c\n" +
-	"\tmatchTime\x18\x04 \x01(\tR\tmatchTime\x12\x1a\n" +
+	"\tmatchTime\x18\x04 \x01(\x03R\tmatchTime\x12\x1a\n" +
 	"\bhostName\x18\x05 \x01(\tR\bhostName\x12\x1a\n" +
 	"\bhostIcon\x18\x06 \x01(\tR\bhostIcon\x12\x1c\n" +
 	"\tguestName\x18\a \x01(\tR\tguestName\x12\x1c\n" +
@@ -2382,7 +2497,17 @@ const file_apipro_proto_rawDesc = "" +
 	"\x06status\x18\n" +
 	" \x01(\tR\x06status\x12,\n" +
 	"\x11reservationStatus\x18\v \x01(\x05R\x11reservationStatus\x12-\n" +
-	"\aanchors\x18\f \x03(\v2\x13.apipro.CommentatorR\aanchors\"`\n" +
+	"\aanchors\x18\f \x03(\v2\x13.apipro.CommentatorR\aanchors\x12\x1e\n" +
+	"\n" +
+	"categoryId\x18\r \x01(\x05R\n" +
+	"categoryId\x12\"\n" +
+	"\fcategoryName\x18\x0e \x01(\tR\fcategoryName\x12\"\n" +
+	"\fcategoryIcon\x18\x0f \x01(\tR\fcategoryIcon\x12(\n" +
+	"\x0fmatchStatusDesc\x18\x10 \x01(\tR\x0fmatchStatusDesc\x12\x1c\n" +
+	"\thostScore\x18\x11 \x01(\x05R\thostScore\x12\x1e\n" +
+	"\n" +
+	"guestScore\x18\x12 \x01(\x05R\n" +
+	"guestScore\"`\n" +
 	"\rMatchListResp\x12%\n" +
 	"\x04list\x18\x01 \x03(\v2\x11.apipro.MatchItemR\x04list\x12\x14\n" +
 	"\x05total\x18\x02 \x01(\x03R\x05total\x12\x12\n" +
@@ -2426,7 +2551,7 @@ const file_apipro_proto_rawDesc = "" +
 	"\x05score\x18\x04 \x01(\x03R\x05score\x12\x12\n" +
 	"\x04rank\x18\x05 \x01(\x05R\x04rank\"8\n" +
 	"\fRoomRankResp\x12(\n" +
-	"\x04list\x18\x01 \x03(\v2\x14.apipro.RoomRankItemR\x04list\"\xcf\x01\n" +
+	"\x04list\x18\x01 \x03(\v2\x14.apipro.RoomRankItemR\x04list\"\xdd\x02\n" +
 	"\bLiveRoom\x12\x18\n" +
 	"\aroomNum\x18\x01 \x01(\tR\aroomNum\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12\x14\n" +
@@ -2434,10 +2559,23 @@ const file_apipro_proto_rawDesc = "" +
 	"\x06anchor\x18\x04 \x01(\v2\x13.apipro.CommentatorR\x06anchor\x12\x18\n" +
 	"\aviewNum\x18\x05 \x01(\x03R\aviewNum\x12\x1a\n" +
 	"\bliveType\x18\x06 \x01(\tR\bliveType\x12\x1a\n" +
-	"\bcateName\x18\a \x01(\tR\bcateName\"J\n" +
+	"\bcateName\x18\a \x01(\tR\bcateName\x12\x1c\n" +
+	"\tviewCount\x18\b \x01(\x03R\tviewCount\x122\n" +
+	"\x14cutOutCustomCoverUrl\x18\t \x01(\tR\x14cutOutCustomCoverUrl\x12\x1a\n" +
+	"\bmarkType\x18\n" +
+	" \x01(\x05R\bmarkType\x12\x1e\n" +
+	"\n" +
+	"liveStatus\x18\v \x01(\x05R\n" +
+	"liveStatus\"\xf2\x01\n" +
 	"\fLiveListResp\x12$\n" +
 	"\x04list\x18\x01 \x03(\v2\x10.apipro.LiveRoomR\x04list\x12\x14\n" +
-	"\x05total\x18\x02 \x01(\x03R\x05total\"F\n" +
+	"\x05total\x18\x02 \x01(\x03R\x05total\x12\"\n" +
+	"\x03all\x18\x03 \x03(\v2\x10.apipro.LiveRoomR\x03all\x12,\n" +
+	"\bfootball\x18\x04 \x03(\v2\x10.apipro.LiveRoomR\bfootball\x120\n" +
+	"\n" +
+	"basketball\x18\x05 \x03(\v2\x10.apipro.LiveRoomR\n" +
+	"basketball\x12\"\n" +
+	"\x03hot\x18\x06 \x03(\v2\x10.apipro.LiveRoomR\x03hot\"F\n" +
 	"\bLiveType\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -2555,54 +2693,58 @@ var file_apipro_proto_depIdxs = []int32{
 	26, // 11: apipro.RoomRankResp.list:type_name -> apipro.RoomRankItem
 	12, // 12: apipro.LiveRoom.anchor:type_name -> apipro.Commentator
 	28, // 13: apipro.LiveListResp.list:type_name -> apipro.LiveRoom
-	30, // 14: apipro.LiveTypeListResp.list:type_name -> apipro.LiveType
-	12, // 15: apipro.HotAnchorResp.list:type_name -> apipro.Commentator
-	36, // 16: apipro.CacheStatsResp.families:type_name -> apipro.FamilyStat
-	4,  // 17: apipro.Apipro.Register:input_type -> apipro.RegisterReq
-	5,  // 18: apipro.Apipro.Login:input_type -> apipro.LoginReq
-	6,  // 19: apipro.Apipro.GuestLogin:input_type -> apipro.GuestReq
-	10, // 20: apipro.Apipro.RefreshToken:input_type -> apipro.RefreshReq
-	11, // 21: apipro.Apipro.GetUserProfile:input_type -> apipro.UidReq
-	1,  // 22: apipro.Apipro.CommentatorList:input_type -> apipro.PageReq
-	3,  // 23: apipro.Apipro.CommentatorDetail:input_type -> apipro.IdReq
-	2,  // 24: apipro.Apipro.MatchListByDate:input_type -> apipro.DateReq
-	0,  // 25: apipro.Apipro.MatchRecommend:input_type -> apipro.Empty
-	3,  // 26: apipro.Apipro.MatchDetail:input_type -> apipro.IdReq
-	0,  // 27: apipro.Apipro.MatchCateList:input_type -> apipro.Empty
-	20, // 28: apipro.Apipro.MatchListByCate:input_type -> apipro.CateReq
-	22, // 29: apipro.Apipro.RoomDetail:input_type -> apipro.RoomNumReq
-	22, // 30: apipro.Apipro.RoomSchedule:input_type -> apipro.RoomNumReq
-	22, // 31: apipro.Apipro.RoomRank:input_type -> apipro.RoomNumReq
-	1,  // 32: apipro.Apipro.LiveList:input_type -> apipro.PageReq
-	0,  // 33: apipro.Apipro.LiveTypeList:input_type -> apipro.Empty
-	0,  // 34: apipro.Apipro.HotAnchor:input_type -> apipro.Empty
-	33, // 35: apipro.Apipro.RefreshCache:input_type -> apipro.CacheRefreshReq
-	0,  // 36: apipro.Apipro.CacheStats:input_type -> apipro.Empty
-	7,  // 37: apipro.Apipro.Register:output_type -> apipro.TokenResp
-	7,  // 38: apipro.Apipro.Login:output_type -> apipro.TokenResp
-	7,  // 39: apipro.Apipro.GuestLogin:output_type -> apipro.TokenResp
-	7,  // 40: apipro.Apipro.RefreshToken:output_type -> apipro.TokenResp
-	9,  // 41: apipro.Apipro.GetUserProfile:output_type -> apipro.UserProfileResp
-	14, // 42: apipro.Apipro.CommentatorList:output_type -> apipro.CommentatorListResp
-	15, // 43: apipro.Apipro.CommentatorDetail:output_type -> apipro.CommentatorDetailResp
-	17, // 44: apipro.Apipro.MatchListByDate:output_type -> apipro.MatchListResp
-	18, // 45: apipro.Apipro.MatchRecommend:output_type -> apipro.MatchRecommendResp
-	19, // 46: apipro.Apipro.MatchDetail:output_type -> apipro.MatchDetailResp
-	21, // 47: apipro.Apipro.MatchCateList:output_type -> apipro.CateListResp
-	17, // 48: apipro.Apipro.MatchListByCate:output_type -> apipro.MatchListResp
-	24, // 49: apipro.Apipro.RoomDetail:output_type -> apipro.RoomDetailResp
-	25, // 50: apipro.Apipro.RoomSchedule:output_type -> apipro.RoomScheduleResp
-	27, // 51: apipro.Apipro.RoomRank:output_type -> apipro.RoomRankResp
-	29, // 52: apipro.Apipro.LiveList:output_type -> apipro.LiveListResp
-	31, // 53: apipro.Apipro.LiveTypeList:output_type -> apipro.LiveTypeListResp
-	32, // 54: apipro.Apipro.HotAnchor:output_type -> apipro.HotAnchorResp
-	34, // 55: apipro.Apipro.RefreshCache:output_type -> apipro.CacheRefreshResp
-	35, // 56: apipro.Apipro.CacheStats:output_type -> apipro.CacheStatsResp
-	37, // [37:57] is the sub-list for method output_type
-	17, // [17:37] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	28, // 14: apipro.LiveListResp.all:type_name -> apipro.LiveRoom
+	28, // 15: apipro.LiveListResp.football:type_name -> apipro.LiveRoom
+	28, // 16: apipro.LiveListResp.basketball:type_name -> apipro.LiveRoom
+	28, // 17: apipro.LiveListResp.hot:type_name -> apipro.LiveRoom
+	30, // 18: apipro.LiveTypeListResp.list:type_name -> apipro.LiveType
+	12, // 19: apipro.HotAnchorResp.list:type_name -> apipro.Commentator
+	36, // 20: apipro.CacheStatsResp.families:type_name -> apipro.FamilyStat
+	4,  // 21: apipro.Apipro.Register:input_type -> apipro.RegisterReq
+	5,  // 22: apipro.Apipro.Login:input_type -> apipro.LoginReq
+	6,  // 23: apipro.Apipro.GuestLogin:input_type -> apipro.GuestReq
+	10, // 24: apipro.Apipro.RefreshToken:input_type -> apipro.RefreshReq
+	11, // 25: apipro.Apipro.GetUserProfile:input_type -> apipro.UidReq
+	1,  // 26: apipro.Apipro.CommentatorList:input_type -> apipro.PageReq
+	3,  // 27: apipro.Apipro.CommentatorDetail:input_type -> apipro.IdReq
+	2,  // 28: apipro.Apipro.MatchListByDate:input_type -> apipro.DateReq
+	0,  // 29: apipro.Apipro.MatchRecommend:input_type -> apipro.Empty
+	3,  // 30: apipro.Apipro.MatchDetail:input_type -> apipro.IdReq
+	0,  // 31: apipro.Apipro.MatchCateList:input_type -> apipro.Empty
+	20, // 32: apipro.Apipro.MatchListByCate:input_type -> apipro.CateReq
+	22, // 33: apipro.Apipro.RoomDetail:input_type -> apipro.RoomNumReq
+	22, // 34: apipro.Apipro.RoomSchedule:input_type -> apipro.RoomNumReq
+	22, // 35: apipro.Apipro.RoomRank:input_type -> apipro.RoomNumReq
+	1,  // 36: apipro.Apipro.LiveList:input_type -> apipro.PageReq
+	0,  // 37: apipro.Apipro.LiveTypeList:input_type -> apipro.Empty
+	0,  // 38: apipro.Apipro.HotAnchor:input_type -> apipro.Empty
+	33, // 39: apipro.Apipro.RefreshCache:input_type -> apipro.CacheRefreshReq
+	0,  // 40: apipro.Apipro.CacheStats:input_type -> apipro.Empty
+	7,  // 41: apipro.Apipro.Register:output_type -> apipro.TokenResp
+	7,  // 42: apipro.Apipro.Login:output_type -> apipro.TokenResp
+	7,  // 43: apipro.Apipro.GuestLogin:output_type -> apipro.TokenResp
+	7,  // 44: apipro.Apipro.RefreshToken:output_type -> apipro.TokenResp
+	9,  // 45: apipro.Apipro.GetUserProfile:output_type -> apipro.UserProfileResp
+	14, // 46: apipro.Apipro.CommentatorList:output_type -> apipro.CommentatorListResp
+	15, // 47: apipro.Apipro.CommentatorDetail:output_type -> apipro.CommentatorDetailResp
+	17, // 48: apipro.Apipro.MatchListByDate:output_type -> apipro.MatchListResp
+	18, // 49: apipro.Apipro.MatchRecommend:output_type -> apipro.MatchRecommendResp
+	19, // 50: apipro.Apipro.MatchDetail:output_type -> apipro.MatchDetailResp
+	21, // 51: apipro.Apipro.MatchCateList:output_type -> apipro.CateListResp
+	17, // 52: apipro.Apipro.MatchListByCate:output_type -> apipro.MatchListResp
+	24, // 53: apipro.Apipro.RoomDetail:output_type -> apipro.RoomDetailResp
+	25, // 54: apipro.Apipro.RoomSchedule:output_type -> apipro.RoomScheduleResp
+	27, // 55: apipro.Apipro.RoomRank:output_type -> apipro.RoomRankResp
+	29, // 56: apipro.Apipro.LiveList:output_type -> apipro.LiveListResp
+	31, // 57: apipro.Apipro.LiveTypeList:output_type -> apipro.LiveTypeListResp
+	32, // 58: apipro.Apipro.HotAnchor:output_type -> apipro.HotAnchorResp
+	34, // 59: apipro.Apipro.RefreshCache:output_type -> apipro.CacheRefreshResp
+	35, // 60: apipro.Apipro.CacheStats:output_type -> apipro.CacheStatsResp
+	41, // [41:61] is the sub-list for method output_type
+	21, // [21:41] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_apipro_proto_init() }
