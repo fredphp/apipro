@@ -56,9 +56,9 @@ func (m *LiveRoomModel) FindByRoomNum(ctx context.Context, roomNum string) (*Liv
                 SELECT `+liveRoomCols+`,
                        u.nick_name, u.icon,
                        u2.nick_name, u2.icon
-                FROM live_room r
-                LEFT JOIN user u  ON u.uid  = r.uid
-                LEFT JOIN user u2 ON u2.uid = r.assistant_uid
+                FROM `+Tbl("live_room")+` r
+                LEFT JOIN `+Tbl("user")+` u  ON u.uid  = r.uid
+                LEFT JOIN `+Tbl("user")+` u2 ON u2.uid = r.assistant_uid
                 WHERE r.room_num=?`, roomNum)
         return scanLiveRoom(row)
 }
@@ -73,9 +73,9 @@ func (m *LiveRoomModel) ListHot(ctx context.Context, limit int) ([]LiveRoom, err
                 SELECT `+liveRoomCols+`,
                        u.nick_name, u.icon,
                        u2.nick_name, u2.icon
-                FROM live_room r
-                LEFT JOIN user u  ON u.uid  = r.uid
-                LEFT JOIN user u2 ON u2.uid = r.assistant_uid
+                FROM `+Tbl("live_room")+` r
+                LEFT JOIN `+Tbl("user")+` u  ON u.uid  = r.uid
+                LEFT JOIN `+Tbl("user")+` u2 ON u2.uid = r.assistant_uid
                 WHERE r.live_status=1 AND r.room_status=1
                 ORDER BY r.mark_type DESC, (r.visit_count + r.fictitious_visit_count) DESC, r.uid ASC
                 LIMIT ?`, limit)
@@ -95,9 +95,9 @@ func (m *LiveRoomModel) ListByType(ctx context.Context, parentID int64, limit in
                 SELECT `+liveRoomCols+`,
                        u.nick_name, u.icon,
                        u2.nick_name, u2.icon
-                FROM live_room r
-                LEFT JOIN user u  ON u.uid  = r.uid
-                LEFT JOIN user u2 ON u2.uid = r.assistant_uid
+                FROM `+Tbl("live_room")+` r
+                LEFT JOIN `+Tbl("user")+` u  ON u.uid  = r.uid
+                LEFT JOIN `+Tbl("user")+` u2 ON u2.uid = r.assistant_uid
                 WHERE r.room_status=1 AND r.live_type_parent=?
                 ORDER BY r.mark_type DESC, (r.visit_count + r.fictitious_visit_count) DESC, r.uid ASC
                 LIMIT ?`, parentID, limit)
@@ -118,9 +118,9 @@ func (m *LiveRoomModel) ListAllVisible(ctx context.Context, limit int) ([]LiveRo
                 SELECT `+liveRoomCols+`,
                        u.nick_name, u.icon,
                        u2.nick_name, u2.icon
-                FROM live_room r
-                LEFT JOIN user u  ON u.uid  = r.uid
-                LEFT JOIN user u2 ON u2.uid = r.assistant_uid
+                FROM `+Tbl("live_room")+` r
+                LEFT JOIN `+Tbl("user")+` u  ON u.uid  = r.uid
+                LEFT JOIN `+Tbl("user")+` u2 ON u2.uid = r.assistant_uid
                 WHERE r.room_status=1
                 ORDER BY r.mark_type DESC, (r.visit_count + r.fictitious_visit_count) DESC, r.uid ASC
                 LIMIT ?`, limit)
@@ -134,7 +134,7 @@ func (m *LiveRoomModel) ListAllVisible(ctx context.Context, limit int) ([]LiveRo
 // BumpVisitCount atomically increments visit_count (used by WS room enter).
 func (m *LiveRoomModel) BumpVisitCount(ctx context.Context, roomNum string, delta int64) error {
         _, err := m.db.ExecContext(ctx,
-                `UPDATE live_room SET visit_count = visit_count + ?, updated_at = strftime('%s','now') WHERE room_num=?`,
+                `UPDATE `+Tbl("live_room")+` SET visit_count = visit_count + ?, updated_at = strftime('%s','now') WHERE room_num=?`,
                 delta, roomNum)
         return err
 }

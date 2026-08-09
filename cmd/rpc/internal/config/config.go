@@ -15,9 +15,20 @@ type Config struct {
         DBDriver   string `json:",default=mysql"` // mysql | sqlite
         DataSource string `json:",optional"`      // DSN
 
+        // SchemaPrefix is the MySQL schema-name prefix used by all qualified
+        // table references (e.g. "zb_" → zb_user.user, zb_live.live_room).
+        // Mirrors backend-zero's haima_* layout but with a customizable prefix.
+        // Only meaningful for MySQL; SQLite ignores this (single-file DB).
+        SchemaPrefix string `json:",default=zb_"`
+
         // Transport encryption keys (16-byte ASCII). Loaded from env in production.
-        ApiKeyReq  string `json:",optional"`
-        ApiKeyResp string `json:",optional"`
+        // Per docs/password-login-register.txt:
+        //   Web (plat=3): ApiKeyReq for request, ApiKeyResp for response
+        //   WAP (plat=4): ApiKeyReq for request, ApiKeyRespWap for response
+        //                 (WAP uses the SAME key for req+resp)
+        ApiKeyReq     string `json:",optional"`
+        ApiKeyResp    string `json:",optional"`
+        ApiKeyRespWap string `json:",optional"` // WAP response key; defaults to ApiKeyReq when empty
 
         // App environment: "dev" | "prod" (controls SMS dev bypass).
         // (Mode is inherited from RpcServerConf — use that for go-zero's service mode.)

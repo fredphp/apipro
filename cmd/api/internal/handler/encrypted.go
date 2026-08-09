@@ -26,13 +26,25 @@ type rpcClient = apiproClient.Apipro
 // callRPC invokes the RPC `Call` method with the given method+param+session.
 // Returns the parsed code/meg/result. On RPC error, returns a business-error
 // envelope with the error message.
+//
+// session_id, seq, and plat are read from the request context (set by the
+// codec.Transport middleware from the CLIENT_INFO protobuf envelope or the
+// legacy JSON envelope / X-Session header).
 func callRPC(svcCtx *svc.ServiceContext, w http.ResponseWriter, r *http.Request, method, paramJSON string) (*apiproClient.CallResp, error) {
-        sid := r.Header.Get("X-Session")
+        ctx := r.Context()
+        sid := codec.SessionID(ctx)
+        if sid == "" {
+                sid = r.Header.Get("X-Session") // legacy fallback
+        }
+        seq := codec.Seq(ctx)
+        plat := codec.Plat(ctx)
         cli := apiproClient.NewApipro(svcCtx.ApiproRpc)
-        resp, err := cli.Call(r.Context(), &apiproClient.CallReq{
+        resp, err := cli.Call(ctx, &apiproClient.CallReq{
                 Method:    method,
                 ParamJson: paramJSON,
                 SessionId: sid,
+                Seq:       seq,
+                Plat:      strconv.Itoa(int(plat)), // "3"=Web, "4"=WAP, "0"=unknown
         })
         if err != nil {
                 logx.Errorf("rpc.Call %s: %v", method, err)
@@ -213,8 +225,9 @@ func SmsGetCodeHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
         }
 }
 
-// KaptchaHandler — GET /api/kaptcha?mobile=<phone>
-// Plaintext SVG image (NOT encrypted).
+// KaptchaHandler — GET /api/kaptcha?t=<ts>&mobile=<phone_or_account>
+// Plaintext SVG image (NOT encrypted). The `t` param is a cache-buster
+// timestamp and is ignored by the server.
 func KaptchaHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
         return func(w http.ResponseWriter, r *http.Request) {
                 mobile := r.URL.Query().Get("mobile")
@@ -222,10 +235,18 @@ func KaptchaHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
                         http.Error(w, "missing mobile", http.StatusBadRequest)
                         return
                 }
-                // Generate 5-char code from visually-unambiguous alphabet.
-                code := genKaptchaCode(5)
-                // Store in Redis (5min TTL) under yuyan:kaptcha:<mobile>.
-                _ = svcCtx.Redis.Setex("yuyan:kaptcha:"+mobile, code, 300)
+                codeLen := svcCtx.Config.KaptchaCodeLen
+                if codeLen <= 0 {
+                        codeLen = 5
+                }
+                ttl := svcCtx.Config.KaptchaTTL
+                if ttl <= 0 {
+                        ttl = 300
+                }
+                // Generate code from visually-unambiguous alphabet.
+                code := genKaptchaCode(codeLen)
+                // Store in Redis under yuyan:kaptcha:<mobile>.
+                _ = svcCtx.Redis.Setex("yuyan:kaptcha:"+mobile, code, ttl)
                 // Render SVG.
                 svg := renderKaptchaSVG(code)
                 w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")

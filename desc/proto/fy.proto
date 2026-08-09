@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package http;
+
+option go_package = "apipro/desc/proto/gen/fy;fy";
+
+// FY_CLIENT is the outer transport envelope used by the zbyy (YuYanTV)
+// encrypted HTTP API. The plaintext payload of the AES-128-ECB frame is a
+// serialized FY_CLIENT message — NOT raw JSON.
+//
+// Wire flow (per docs/password-login-register.txt):
+//   Request:  FY_CLIENT.common_req  { CLIENT_INFO, param(JSON bytes) }
+//   Response: FY_CLIENT.common_resp { COMMON_RESULT, result(JSON bytes) }
+//
+// Field-number note for CLIENT_INFO:
+//   The original spec doc shows `app_ver = 3` AND `plat = 3` — a duplicate
+//   field number which is invalid in proto3. The natural numbering (1,2,3,
+//   4,5,6) places `plat` at field 5. We define plat=5 here, and the codec
+//   also reads field 3 (app_ver) as a fallback when plat==0, so clients
+//   that put plat at field 3 still work.
+
+message FY_CLIENT {
+  COMMON_REQ  common_req  = 1; // public request
+  COMMON_RESP common_resp = 2; // public response
+}
+
+// CLIENT_INFO carries per-client context.
+message CLIENT_INFO {
+  string session_id   = 1; // session id (guest-generated or server-issued)
+  int32  seq          = 2; // sequence number
+  int32  app_ver      = 3; // app version (always 0 per spec; also fallback for plat)
+  int32  package_code = 4; // package id
+  int32  plat         = 5; // platform: 3=Web, 4=WAP (moved from 3 — proto3 dedup)
+  int32  language     = 6; // system language (1=zh)
+}
+
+// COMMON_RESULT is the status block inside COMMON_RESP.
+message COMMON_RESULT {
+  int32  err_code       = 1; // 200 = success
+  string err_msg        = 2; // error message
+  int32  seq            = 3; // sequence number (echoed)
+  string new_session_id = 4; // new session id (for rotation)
+}
+
+// COMMON_REQ wraps the business param + client info.
+message COMMON_REQ {
+  CLIENT_INFO client_info = 1;
+  bytes       param       = 2; // JSON business payload
+}
+
+// COMMON_RESP wraps the business result + status.
+message COMMON_RESP {
+  COMMON_RESULT common_result = 1;
+  bytes         result        = 2; // JSON business payload
+}

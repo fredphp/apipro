@@ -68,6 +68,18 @@ func NewServiceContext(c config.Config) *ServiceContext {
         ch := cache.New(rdb)
         sch := cache.NewScheduler()
 
+        // Configure schema-name qualification BEFORE constructing models:
+        //   MySQL  → use qualified <prefix>schema.table (e.g. zb_user.user)
+        //   SQLite → use bare table names (single-file DB, no namespaces)
+        switch strings.ToLower(strings.TrimSpace(c.DBDriver)) {
+        case "sqlite", "sqlite3":
+                model.SetNoSchemaPrefix()
+        default:
+                if p := strings.TrimSpace(c.SchemaPrefix); p != "" {
+                        model.SetSchemaPrefix(p)
+                }
+        }
+
         sqlDB := db.MustNew(c.DBDriver, c.DataSource)
         models := &Models{
                 Users:        model.NewUserModel(sqlDB),

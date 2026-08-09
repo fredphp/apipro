@@ -133,6 +133,7 @@ type loginReq struct {
         AccountType int    `json:"accountType"`
         CountryCode string `json:"countryCode"`
         Phone       string `json:"phone"`
+        LoginName   string `json:"loginName"` // accountType=2 (account login)
         LoginMode   int    `json:"loginMode"`
         LoginType   int    `json:"loginType"`
         Password    string `json:"password"` // client md5 hex (case-sensitive)
@@ -144,6 +145,7 @@ type registerReq struct {
         AccountType int    `json:"accountType"`
         CountryCode string `json:"countryCode"`
         Phone       string `json:"phone"`
+        LoginName   string `json:"loginName"` // accountType=2 (account register)
         SmsType     int    `json:"smsType"`
         SmsCode     string `json:"smsCode"`
         Password    string `json:"password"` // client md5
@@ -190,32 +192,78 @@ func (l *CallLogic) handleLogin(in *apipro.CallReq) (json.RawMessage, int, strin
         if err := json.Unmarshal([]byte(in.ParamJson), &req); err != nil {
                 return nil, CodeBusinessError, "invalid request"
         }
-        // Validation gate (matches backend-zero auth.go:213)
-        if req.AccountType == 0 || req.LoginMode != 1 || req.LoginType != 1 || req.Phone == "" {
+        // Validation gate (matches backend-zero auth.go:213).
+        // accountType=1 → phone login; accountType=2 → account login (by loginName).
+        if req.AccountType == 0 || req.LoginMode != 1 || req.LoginType != 1 {
                 return nil, CodeBusinessError, "登录失败"
         }
         if req.PwdType != auth.PwdTypeMD5 {
                 return nil, CodeBusinessError, "pwd_type 1 is unsupported; use pwd_type=2"
         }
-        // Normalize country code (strip +)
-        cc := normalizeCC(req.CountryCode)
+        // Resolve plat: prefer CLIENT_INFO plat (via CallReq.Plat), fall back to
+        // the business JSON plat field (legacy clients).
+        plat := resolvePlat(in.Plat, req.Plat)
 
-        // AUDIT-003: phone format validation.
+        rdb := l.svcCtx.Redis
+
+        // ---- Branch: account login (accountType=2) ----
+        if req.AccountType == 2 {
+                loginName := strings.TrimSpace(req.LoginName)
+                if loginName == "" {
+                        return nil, CodeBusinessError, "登录失败"
+                }
+                // Rate limit by loginName (10/min).
+                loginLimiter := ratelimit.New(rdb, 10, "yuyan:ratelimit:login")
+                if !loginLimiter.Allow(l.ctx, "acct:"+loginName) {
+                        return nil, CodeRateLimited, "操作过于频繁，请稍后再试"
+                }
+                lockKey := "yuyan:login:lock:acct:" + loginName
+                if locked, _ := rdb.Get(lockKey); locked != "" {
+                        return nil, CodeLoginLocked, "账号已锁定，请30分钟后再试"
+                }
+                u, err := l.svcCtx.Models.Users.FindByLoginName(l.ctx, loginName)
+                if err != nil {
+                        if errors.Is(err, model.ErrNotFound) {
+                                return nil, CodeAccountNotFound, "账号未注册"
+                        }
+                        return nil, CodeBusinessError, err.Error()
+                }
+                if u.PwdType != auth.PwdTypeMD5 {
+                        l.recordLoginFailAcct(loginName)
+                        return nil, CodePasswordWrong, "密码错误"
+                }
+                if !auth.VerifyPassword(req.Password, u.Password, u.Salt) {
+                        l.recordLoginFailAcct(loginName)
+                        return nil, CodePasswordWrong, "密码错误"
+                }
+                if u.Status != 1 {
+                        return nil, CodeUserBanned, "账号已封禁"
+                }
+                _, _ = rdb.Del("yuyan:login:fail:acct:" + loginName)
+                sess, err := l.svcCtx.Sessions.IssueUser(l.ctx, u.UID, u.NickName, u.Icon, int(u.UserType), plat)
+                if err != nil {
+                        return nil, CodeBusinessError, "issue session: " + err.Error()
+                }
+                resp := l.buildAuthResponse(sess, u)
+                return jsonBytes(resp), CodeOK, ""
+        }
+
+        // ---- Branch: phone login (accountType=1, existing flow) ----
+        if req.Phone == "" {
+                return nil, CodeBusinessError, "登录失败"
+        }
+        cc := normalizeCC(req.CountryCode)
         if !validatePhone(cc, req.Phone) {
                 return nil, CodePhoneInvalid, "手机号码格式错误"
         }
-        // AUDIT-003: per-(cc,phone) rate limit — 10/min.
-        rdb := l.svcCtx.Redis
         loginLimiter := ratelimit.New(rdb, 10, "yuyan:ratelimit:login")
         if !loginLimiter.Allow(l.ctx, cc+":"+req.Phone) {
                 return nil, CodeRateLimited, "操作过于频繁，请稍后再试"
         }
-        // AUDIT-003: fail-lockout check — if a lock key exists, refuse.
         lockKey := "yuyan:login:lock:" + cc + ":" + req.Phone
         if locked, _ := rdb.Get(lockKey); locked != "" {
                 return nil, CodeLoginLocked, "账号已锁定，请30分钟后再试"
         }
-
         u, err := l.svcCtx.Models.Users.FindByPhone(l.ctx, cc, req.Phone)
         if err != nil {
                 if errors.Is(err, model.ErrNotFound) {
@@ -223,7 +271,6 @@ func (l *CallLogic) handleLogin(in *apipro.CallReq) (json.RawMessage, int, strin
                 }
                 return nil, CodeBusinessError, err.Error()
         }
-        // Verify password
         if u.PwdType != auth.PwdTypeMD5 {
                 l.recordLoginFail(cc, req.Phone)
                 return nil, CodePasswordWrong, "密码错误"
@@ -232,19 +279,52 @@ func (l *CallLogic) handleLogin(in *apipro.CallReq) (json.RawMessage, int, strin
                 l.recordLoginFail(cc, req.Phone)
                 return nil, CodePasswordWrong, "密码错误"
         }
-        // Check status
         if u.Status != 1 {
                 return nil, CodeUserBanned, "账号已封禁"
         }
-        // AUDIT-003: clear fail counter on success.
         _, _ = rdb.Del("yuyan:login:fail:" + cc + ":" + req.Phone)
-        // Issue session
-        sess, err := l.svcCtx.Sessions.IssueUser(l.ctx, u.UID, u.NickName, u.Icon, int(u.UserType), req.Plat)
+        sess, err := l.svcCtx.Sessions.IssueUser(l.ctx, u.UID, u.NickName, u.Icon, int(u.UserType), plat)
         if err != nil {
                 return nil, CodeBusinessError, "issue session: " + err.Error()
         }
         resp := l.buildAuthResponse(sess, u)
         return jsonBytes(resp), CodeOK, ""
+}
+
+// resolvePlat parses the plat from CallReq.Plat (string, set by the codec
+// middleware from CLIENT_INFO) and falls back to the business-JSON plat.
+//   3 = Web, 4 = WAP, 0 = unknown (defaults to 4/H5).
+func resolvePlat(callReqPlat string, jsonPlat int) int {
+        if s := strings.TrimSpace(callReqPlat); s != "" {
+                if n, err := strconv.Atoi(s); err == nil && n > 0 {
+                        return n
+                }
+        }
+        if jsonPlat > 0 {
+                return jsonPlat
+        }
+        return 4 // default H5/WAP
+}
+
+// recordLoginFailAcct is the account-based counterpart of recordLoginFail.
+func (l *CallLogic) recordLoginFailAcct(loginName string) {
+        rdb := l.svcCtx.Redis
+        if rdb == nil {
+                return
+        }
+        failKey := "yuyan:login:fail:acct:" + loginName
+        lockKey := "yuyan:login:lock:acct:" + loginName
+        cnt, err := rdb.Incr(failKey)
+        if err != nil {
+                return
+        }
+        if cnt == 1 {
+                _ = rdb.Expire(failKey, 15*60)
+        }
+        if cnt >= 10 {
+                _ = rdb.Setex(lockKey, "1", 30*60)
+                _, _ = rdb.Del(failKey)
+        }
 }
 
 // recordLoginFail increments the per-(cc,phone) fail counter. After 10 fails
@@ -276,12 +356,72 @@ func (l *CallLogic) handleRegister(in *apipro.CallReq) (json.RawMessage, int, st
         if err := json.Unmarshal([]byte(in.ParamJson), &req); err != nil {
                 return nil, CodeBusinessError, "invalid request"
         }
-        if req.AccountType != 1 || req.Phone == "" || req.NickName == "" || req.PwdType != auth.PwdTypeMD5 {
+        if req.AccountType == 0 || req.NickName == "" || req.PwdType != auth.PwdTypeMD5 {
                 return nil, CodeBusinessError, "注册失败"
         }
         // AUDIT-005: nickname length check (>= 2 runes).
         if utf8.RuneCountInString(req.NickName) < 2 {
                 return nil, CodeBusinessError, "昵称至少2个字符"
+        }
+        // Resolve plat from CLIENT_INFO (via CallReq.Plat), fall back to JSON plat.
+        plat := resolvePlat(in.Plat, req.Plat)
+
+        // ---- Branch: account register (accountType=2) — NO SMS, only kaptcha ----
+        if req.AccountType == 2 {
+                loginName := strings.TrimSpace(req.LoginName)
+                if loginName == "" {
+                        return nil, CodeBusinessError, "注册失败"
+                }
+                // AUDIT-005: verify kaptcha — keyed by loginName.
+                kaptchaKey := "yuyan:kaptcha:" + loginName
+                storedKaptcha, _ := l.svcCtx.Cache.Rdb().Get(kaptchaKey)
+                _, _ = l.svcCtx.Cache.Rdb().Del(kaptchaKey)
+                if !strings.EqualFold(strings.TrimSpace(storedKaptcha), strings.TrimSpace(req.Kaptcha)) {
+                        return nil, CodeKaptchaInvalid, "图形验证码错误"
+                }
+                // Check loginName not already registered.
+                if existing, err := l.svcCtx.Models.Users.FindByLoginName(l.ctx, loginName); err == nil && existing != nil {
+                        return nil, CodePhoneAlreadyReg, "账号已被注册"
+                }
+                uid, err := l.svcCtx.AllocUID(l.ctx)
+                if err != nil {
+                        return nil, CodeBusinessError, "uid alloc: " + err.Error()
+                }
+                stored, salt, err := auth.HashPassword(req.Password)
+                if err != nil {
+                        return nil, CodeBusinessError, "hash: " + err.Error()
+                }
+                u := &model.User{
+                        UID:       uid,
+                        LoginName: loginName,
+                        NickName:  req.NickName,
+                        Password:  stored,
+                        Salt:      salt,
+                        PwdType:   auth.PwdTypeMD5,
+                        UserType:  1, // audience
+                        Status:    1,
+                        Icon:      req.Icon,
+                        Gender:    0,
+                        Plat:      int32(plat),
+                }
+                if err := l.svcCtx.Models.Users.Insert(l.ctx, u); err != nil {
+                        if errors.Is(err, model.ErrDuplicate) {
+                                logx.Errorf("register: uid collision uid=%d (retry recommended)", uid)
+                                return nil, CodeBusinessError, "注册失败请重试"
+                        }
+                        return nil, CodeBusinessError, "insert: " + err.Error()
+                }
+                sess, err := l.svcCtx.Sessions.IssueUser(l.ctx, u.UID, u.NickName, u.Icon, int(u.UserType), plat)
+                if err != nil {
+                        return nil, CodeBusinessError, "issue session: " + err.Error()
+                }
+                resp := l.buildAuthResponse(sess, u)
+                return jsonBytes(resp), CodeOK, ""
+        }
+
+        // ---- Branch: phone register (accountType=1, existing flow) ----
+        if req.Phone == "" {
+                return nil, CodeBusinessError, "注册失败"
         }
         cc := normalizeCC(req.CountryCode)
         // AUDIT-003: phone format validation.
@@ -326,7 +466,7 @@ func (l *CallLogic) handleRegister(in *apipro.CallReq) (json.RawMessage, int, st
                 Status:      1,
                 Icon:        req.Icon,
                 Gender:      0,
-                Plat:        int32(req.Plat),
+                Plat:        int32(plat),
         }
         if err := l.svcCtx.Models.Users.Insert(l.ctx, u); err != nil {
                 // AUDIT-008: PK violation on uid is a race / counter collision, NOT a
@@ -337,7 +477,7 @@ func (l *CallLogic) handleRegister(in *apipro.CallReq) (json.RawMessage, int, st
                 }
                 return nil, CodeBusinessError, "insert: " + err.Error()
         }
-        sess, err := l.svcCtx.Sessions.IssueUser(l.ctx, u.UID, u.NickName, u.Icon, int(u.UserType), req.Plat)
+        sess, err := l.svcCtx.Sessions.IssueUser(l.ctx, u.UID, u.NickName, u.Icon, int(u.UserType), plat)
         if err != nil {
                 return nil, CodeBusinessError, "issue session: " + err.Error()
         }
@@ -350,10 +490,8 @@ func (l *CallLogic) handleGuestLogin(in *apipro.CallReq) (json.RawMessage, int, 
                 Plat int `json:"plat"`
         }
         _ = json.Unmarshal([]byte(in.ParamJson), &req)
-        if req.Plat == 0 {
-                req.Plat = 4 // default H5
-        }
-        sess, err := l.svcCtx.Sessions.IssueGuest(l.ctx, req.Plat)
+        plat := resolvePlat(in.Plat, req.Plat)
+        sess, err := l.svcCtx.Sessions.IssueGuest(l.ctx, plat)
         if err != nil {
                 return nil, CodeBusinessError, "issue guest: " + err.Error()
         }

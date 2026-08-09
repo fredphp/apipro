@@ -23,22 +23,42 @@ Redis:
 # Database for WS chat persistence + room/user lookups
 # (AUDIT-010/011/012). When DataSource is empty, the WS hub runs in
 # Redis-only mode (no MySQL persistence, no live-status check).
+#
+# Production uses a multi-database MySQL layout (zb_user / zb_live / zb_chat
+# / ...). The DSN must NOT pin a specific database — leave the path empty
+# so cross-schema queries work:
+#
+#   user:pass@tcp(host:port)/?params...
+#
+# SchemaPrefix must match the RPC service so both processes emit the same
+# fully-qualified table names.
 # ============================================================
 DBDriver: mysql
-DataSource: root:123456@tcp(127.0.0.1:3306)/apipro?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
+DataSource: root:123456@tcp(127.0.0.1:3306)/?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
 # DBDriver: sqlite
 # DataSource: ./data/apipro.db
+SchemaPrefix: "zb_"
 
 # ============================================================
 # Transport encryption (must match RPC)
+# Per docs/password-login-register.txt:
+#   Web (plat=3): req=PHp1st5vEg5Ca8FH, resp=qlCJekfRKwWkQxl7
+#   WAP (plat=4): req=PHp1st5vEg5Ca8FH, resp=PHp1st5vEg5Ca8FH (same as req)
 # ============================================================
 ApiKeyReq: "PHp1st5vEg5Ca8FH"
 ApiKeyResp: "qlCJekfRKwWkQxl7"
+ApiKeyRespWap: "PHp1st5vEg5Ca8FH"
 
 # ============================================================
 # App mode + SMS dev bypass
 # ============================================================
 SmsDevBypassCode: "8888"
+
+# ============================================================
+# Kaptcha (image captcha) — /api/kaptcha?t=<ts>&mobile=<phone>
+# ============================================================
+KaptchaCodeLen: 5
+KaptchaTTL: 300
 
 # ============================================================
 # JSONP snapshot directory (served as static files)

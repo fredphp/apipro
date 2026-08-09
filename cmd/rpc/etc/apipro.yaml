@@ -5,12 +5,26 @@ AppMode: dev
 # ============================================================
 # Database
 # ============================================================
-# MySQL is the production driver. SQLite is a zero-dependency fallback for
-# local testing (switch DBDriver to "sqlite" and DataSource to a file path).
+# Production uses a multi-database MySQL layout (mirrors backend-zero's
+# haima_* schema boundaries, but with a customizable prefix). The DSN below
+# must NOT pin a specific database — leave the path empty so cross-schema
+# queries like `zb_user.user JOIN zb_live.live_room` work without friction.
+#
+# Format:  user:pass@tcp(host:port)/?params...
+# (note the trailing "/" with NO database name after it)
 DBDriver: mysql
-DataSource: root:123456@tcp(127.0.0.1:3306)/apipro?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
+DataSource: root:123456@tcp(127.0.0.1:3306)/?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
+# SQLite fallback (single-file, all tables in one DB — schema prefix is
+# ignored automatically when DBDriver=sqlite):
 # DBDriver: sqlite
 # DataSource: ./data/apipro.db
+
+# SchemaPrefix is prepended to every schema short-name when MySQL is in use,
+# producing fully-qualified table names like <prefix>user.user, <prefix>live.live_room,
+# <prefix>chat.chat_room_message, etc.
+#   "zb_"    → matches your local environment (zb_user / zb_live / zb_chat / ...)
+#   "haima_" → matches backend-zero upstream
+SchemaPrefix: "zb_"
 
 # ============================================================
 # Redis (cache + scheduled refresh + chat history + sessions)
@@ -21,10 +35,13 @@ CacheRedis:
 
 # ============================================================
 # Transport encryption (AES-128-ECB/PKCS7) — same as production.
-# Empty = encrypted routes return errors. Defaults to the production keys.
+# Per docs/password-login-register.txt:
+#   Web (plat=3): req=PHp1st5vEg5Ca8FH, resp=qlCJekfRKwWkQxl7
+#   WAP (plat=4): req=PHp1st5vEg5Ca8FH, resp=PHp1st5vEg5Ca8FH (same as req)
 # ============================================================
 ApiKeyReq: "PHp1st5vEg5Ca8FH"
 ApiKeyResp: "qlCJekfRKwWkQxl7"
+ApiKeyRespWap: "PHp1st5vEg5Ca8FH"
 
 # ============================================================
 # App mode: dev = SMS bypass code honored; prod = strict.

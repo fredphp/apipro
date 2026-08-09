@@ -57,7 +57,7 @@ func (m *UserModel) Insert(ctx context.Context, u *User) error {
         } else {
                 birthday = nil
         }
-        _, err := m.db.ExecContext(ctx, `INSERT INTO user
+        _, err := m.db.ExecContext(ctx, `INSERT INTO `+Tbl("user")+`
                 (uid, login_name, nick_name, phone, country_code, password, salt, pwd_type, user_type, score, grow, status, icon, gender, birthday, plat, created_at, updated_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
                 u.UID, u.LoginName, u.NickName, u.Phone, u.CountryCode, u.Password, u.Salt, u.PwdType,
@@ -73,17 +73,17 @@ func (m *UserModel) Insert(ctx context.Context, u *User) error {
 }
 
 func (m *UserModel) FindByUid(ctx context.Context, uid int64) (*User, error) {
-        row := m.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM user WHERE uid=?`, uid)
+        row := m.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM `+Tbl("user")+` WHERE uid=?`, uid)
         return scanUser(row)
 }
 
 func (m *UserModel) FindByPhone(ctx context.Context, cc, phone string) (*User, error) {
-        row := m.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM user WHERE country_code=? AND phone=?`, cc, phone)
+        row := m.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM `+Tbl("user")+` WHERE country_code=? AND phone=?`, cc, phone)
         return scanUser(row)
 }
 
 func (m *UserModel) FindByLoginName(ctx context.Context, loginName string) (*User, error) {
-        row := m.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM user WHERE login_name=?`, loginName)
+        row := m.db.QueryRowContext(ctx, `SELECT `+userCols+` FROM `+Tbl("user")+` WHERE login_name=?`, loginName)
         return scanUser(row)
 }
 
@@ -95,7 +95,7 @@ func (m *UserModel) FindByLoginName(ctx context.Context, loginName string) (*Use
 // (Redis INCR) instead. This method is retained as the DB-only fallback.
 func (m *UserModel) NextUID(ctx context.Context) (int64, error) {
         var maxUID int64
-        _ = m.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(uid), 1000) FROM user`).Scan(&maxUID)
+        _ = m.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(uid), 1000) FROM `+Tbl("user")+``).Scan(&maxUID)
         // Start from 5000+ for audience users to avoid clashing with seeded anchors (1001-1003)
         if maxUID < 5000 {
                 return 5001, nil
@@ -107,7 +107,7 @@ func (m *UserModel) NextUID(ctx context.Context) (int64, error) {
 // Redis UID counter). Returns 0 on empty table.
 func (m *UserModel) MaxUID(ctx context.Context) (int64, error) {
         var maxUID sql.NullInt64
-        err := m.db.QueryRowContext(ctx, `SELECT MAX(uid) FROM user`).Scan(&maxUID)
+        err := m.db.QueryRowContext(ctx, `SELECT MAX(uid) FROM `+Tbl("user")+``).Scan(&maxUID)
         if err != nil {
                 if err == sql.ErrNoRows {
                         return 0, nil
@@ -172,8 +172,8 @@ type UserGrow struct {
 func (m *UserModel) FindUserGrowForValue(ctx context.Context, value int64) (*UserGrow, error) {
         row := m.db.QueryRowContext(ctx, `
                 SELECT g.id, g.name, g.min_grow, g.sort, g.status,
-                       COALESCE((SELECT MIN(g2.min_grow) FROM user_grow g2 WHERE g2.min_grow > g.min_grow AND g2.status=1), 0)
-                FROM user_grow g
+                       COALESCE((SELECT MIN(g2.min_grow) FROM `+Tbl("user_grow")+` g2 WHERE g2.min_grow > g.min_grow AND g2.status=1), 0)
+                FROM `+Tbl("user_grow")+` g
                 WHERE g.status=1 AND g.min_grow <= ?
                 ORDER BY g.min_grow DESC LIMIT 1`, value)
         var g UserGrow

@@ -1,6 +1,8 @@
 package svc
 
 import (
+        "strings"
+
         "apipro/cmd/api/internal/config"
         "apipro/common/db"
         "apipro/common/model"
@@ -28,6 +30,18 @@ type ServiceContext struct {
 func NewServiceContext(c config.Config) *ServiceContext {
         rdb := redis.MustNewRedis(c.Redis)
 
+        // Configure schema-name qualification BEFORE constructing models:
+        //   MySQL  → qualified <prefix>schema.table (e.g. zb_user.user)
+        //   SQLite → bare table names (single-file DB)
+        switch strings.ToLower(strings.TrimSpace(c.DBDriver)) {
+        case "sqlite", "sqlite3":
+                model.SetNoSchemaPrefix()
+        default:
+                if p := strings.TrimSpace(c.SchemaPrefix); p != "" {
+                        model.SetSchemaPrefix(p)
+                }
+        }
+
         // Codec keys — fall back to production defaults if unset.
         reqKey := []byte(c.ApiKeyReq)
         if len(reqKey) == 0 {
@@ -36,6 +50,12 @@ func NewServiceContext(c config.Config) *ServiceContext {
         respKey := []byte(c.ApiKeyResp)
         if len(respKey) == 0 {
                 respKey = []byte(codec.DefaultResponseKey)
+        }
+        // WAP response key — defaults to the request key (per spec, WAP uses
+        // the SAME key for both request and response).
+        wapRespKey := []byte(c.ApiKeyRespWap)
+        if len(wapRespKey) == 0 {
+                wapRespKey = reqKey
         }
 
         // AUDIT-010/011/012: when a DB DataSource is configured, pass the
@@ -69,8 +89,9 @@ func NewServiceContext(c config.Config) *ServiceContext {
                 AuthLimiter: ratelimit.New(rdb, c.RateLimitAuthPerMinute, "auth"),
                 ChatHub:     hub,
                 Transport: codec.TransportConfig{
-                        RequestKey:  reqKey,
-                        ResponseKey: respKey,
+                        RequestKey:     reqKey,
+                        ResponseKey:    respKey,
+                        WapResponseKey: wapRespKey,
                 },
         }
 }

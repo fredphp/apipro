@@ -79,11 +79,11 @@ func (m *MatchModel) ListCatalog(ctx context.Context, parents []int64, limit int
                        COALESCE(lt.icon, ''), COALESCE(lt.type_name, ''),
                        u.uid, u.nick_name, u.icon,
                        r.room_num, r.detail, r.notice
-                FROM match_schedule ms
-                INNER JOIN match_schedule_room msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
-                LEFT JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
-                LEFT JOIN user u ON u.uid = r.uid
-                LEFT JOIN live_type lt ON lt.live_type_id = ms.live_type_parent
+                FROM `+Tbl("match_schedule")+` ms
+                INNER JOIN `+Tbl("match_schedule_room")+` msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
+                LEFT JOIN `+Tbl("live_room")+` r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN `+Tbl("user")+` u ON u.uid = r.uid
+                LEFT JOIN `+Tbl("live_type")+` lt ON lt.live_type_id = ms.live_type_parent
                 WHERE ms.status = 1 AND ms.live_type_parent IN (` + placeholders(len(parents)) + `)
                 ORDER BY ms.match_time ASC LIMIT ?`
         for _, p := range parents {
@@ -120,11 +120,11 @@ func (m *MatchModel) ListByDate(ctx context.Context, dateStr string, limit int) 
                        COALESCE(lt.icon, ''), COALESCE(lt.type_name, ''),
                        u.uid, u.nick_name, u.icon,
                        r.room_num, r.detail, r.notice
-                FROM match_schedule ms
-                INNER JOIN match_schedule_room msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
-                LEFT JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
-                LEFT JOIN user u ON u.uid = r.uid
-                LEFT JOIN live_type lt ON lt.live_type_id = ms.live_type_parent
+                FROM `+Tbl("match_schedule")+` ms
+                INNER JOIN `+Tbl("match_schedule_room")+` msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
+                LEFT JOIN `+Tbl("live_room")+` r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN `+Tbl("user")+` u ON u.uid = r.uid
+                LEFT JOIN `+Tbl("live_type")+` lt ON lt.live_type_id = ms.live_type_parent
                 WHERE ms.status = 1 AND ms.match_time >= ? AND ms.match_time <= ?
                 ORDER BY ms.match_time ASC LIMIT ?`, start, end, limit)
         if err != nil {
@@ -148,11 +148,11 @@ func (m *MatchModel) ListRecommend(ctx context.Context, limit int) ([]MatchCatal
                        COALESCE(lt.icon, ''), COALESCE(lt.type_name, ''),
                        u.uid, u.nick_name, u.icon,
                        r.room_num, r.detail, r.notice
-                FROM match_schedule ms
-                INNER JOIN match_schedule_room msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
-                LEFT JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
-                LEFT JOIN user u ON u.uid = r.uid
-                LEFT JOIN live_type lt ON lt.live_type_id = ms.live_type_parent
+                FROM `+Tbl("match_schedule")+` ms
+                INNER JOIN `+Tbl("match_schedule_room")+` msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1
+                LEFT JOIN `+Tbl("live_room")+` r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN `+Tbl("user")+` u ON u.uid = r.uid
+                LEFT JOIN `+Tbl("live_type")+` lt ON lt.live_type_id = ms.live_type_parent
                 WHERE ms.status = 1
                 ORDER BY ms.hot DESC, ms.match_time ASC LIMIT ?`, limit)
         if err != nil {
@@ -175,11 +175,11 @@ func (m *MatchModel) ListByRoom(ctx context.Context, roomNum string, limit int) 
                        COALESCE(lt.icon, ''), COALESCE(lt.type_name, ''),
                        u.uid, u.nick_name, u.icon,
                        r.room_num, r.detail, r.notice
-                FROM match_schedule ms
-                INNER JOIN match_schedule_room msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1 AND msr.room_num = ?
-                LEFT JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
-                LEFT JOIN user u ON u.uid = r.uid
-                LEFT JOIN live_type lt ON lt.live_type_id = ms.live_type_parent
+                FROM `+Tbl("match_schedule")+` ms
+                INNER JOIN `+Tbl("match_schedule_room")+` msr ON msr.schedule_id = ms.schedule_id AND msr.status = 1 AND msr.room_num = ?
+                LEFT JOIN `+Tbl("live_room")+` r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN `+Tbl("user")+` u ON u.uid = r.uid
+                LEFT JOIN `+Tbl("live_type")+` lt ON lt.live_type_id = ms.live_type_parent
                 WHERE ms.status = 1
                 ORDER BY ms.match_time ASC LIMIT ?`, roomNum, limit)
         if err != nil {
@@ -200,10 +200,10 @@ func (m *MatchModel) ListRoomsBySchedule(ctx context.Context, scheduleID int64, 
                 SELECT `+liveRoomCols+`,
                        u.nick_name, u.icon,
                        u2.nick_name, u2.icon
-                FROM match_schedule_room msr
-                INNER JOIN live_room r ON r.room_num = msr.room_num AND r.room_status = 1
-                LEFT JOIN user u  ON u.uid  = r.uid
-                LEFT JOIN user u2 ON u2.uid = r.assistant_uid
+                FROM `+Tbl("match_schedule_room")+` msr
+                INNER JOIN `+Tbl("live_room")+` r ON r.room_num = msr.room_num AND r.room_status = 1
+                LEFT JOIN `+Tbl("user")+` u  ON u.uid  = r.uid
+                LEFT JOIN `+Tbl("user")+` u2 ON u2.uid = r.assistant_uid
                 WHERE msr.schedule_id = ? AND msr.status = 1
                 ORDER BY r.mark_type DESC, (r.visit_count + r.fictitious_visit_count) DESC, r.uid ASC
                 LIMIT ?`, scheduleID, limit)

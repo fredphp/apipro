@@ -114,32 +114,72 @@ members and the last 50 are kept in Redis.
 
 ## Database (data source)
 
-All API data comes from a **MySQL database** (production) or **SQLite** (dev/self-check).
-The schema is derived from the zbyy data model:
+All API data comes from a **multi-database MySQL layout** in production,
+mirroring the **backend-zero** data boundaries. The application reads from
+6 logically separated MySQL schemas sharing the `zb_` prefix:
 
-| Table | Description |
-|-------|-------------|
-| `users` | Registered users + guests (password = client md5 hash) |
-| `anchors` | Commentators / anchors (解说员) |
-| `rooms` | Live rooms (直播间) |
-| `matches` | Match schedule (赛程) |
-| `match_anchors` | Match ↔ anchor many-to-many |
-| `live_types` | Live type categories (足球/篮球/斯诺克/其它) |
-| `room_ranks` | Room gift leaderboards (排行榜) |
+| MySQL schema  | Tables                                                              | Mirrors backend-zero |
+|---------------|---------------------------------------------------------------------|----------------------|
+| `zb_user`     | `user`, `user_grow`, `room_gift_rank`                               | `haima_user`         |
+| `zb_live`     | `live_type`, `live_room`, `anchors`, `match_schedule`, `match_schedule_room`, `live_hot_recommend` | `haima_live` |
+| `zb_chat`     | `chat_room_message`                                                 | `haima_chat`         |
+| `zb_gift`     | (reserved for future gift catalog)                                  | `haima_gift`         |
+| `zb_admin`    | (reserved for future admin_user)                                    | `haima_admin`        |
+| `zb_sys`      | (reserved for future ads / articles / system messages)              | `haima_sys`          |
+
+The schema prefix is configurable via `SchemaPrefix` in the yaml (default
+`"zb_"`). Switch it to `"haima_"` to match the upstream backend-zero
+deployment, or any other prefix your environment uses — no code changes
+required.
+
+For **dev / self-check**, a single-file **SQLite** database is supported
+(`DBDriver: sqlite`). When SQLite is in use, the model layer automatically
+emits bare table names (no schema qualification) since SQLite has no
+MySQL-style cross-database namespaces.
+
+### DSN format (important)
+
+Because MySQL queries cross schemas (e.g. `zb_user.user JOIN
+zb_live.live_room`), the DSN must **NOT** pin a specific database — leave
+the path empty:
+
+```
+root:123456@tcp(127.0.0.1:3306)/?charset=utf8mb4&parseTime=true&loc=Local
+                                              ^^^ empty path — required for cross-schema queries
+```
+
+Pinning `/apipro` (or any other single db) would break the JOINs.
 
 ### Schema files
-- `deploy/schema.mysql.sql` — MySQL schema + seed data
-- `deploy/schema.sqlite.sql` — SQLite schema (dev)
+- `deploy/schema.mysql.sql` — creates all 6 `zb_*` schemas + tables + seed data
+- `deploy/schema.sqlite.sql` — single-file SQLite schema (dev)
+
+### Apply the schema
+
+```bash
+# MySQL — creates zb_user / zb_live / zb_chat / zb_gift / zb_admin / zb_sys
+mysql -u root -p < deploy/schema.mysql.sql
+
+# SQLite — tables auto-created on first startup (no manual step)
+```
 
 ### Configuration
 
-`cmd/rpc/etc/apipro.yaml`:
-```yaml
-# Database (数据来源)
-DBDriver: sqlite                          # mysql | sqlite
-DataSource: ./data/apipro.db              # MySQL: user:pass@tcp(host:3306)/apipro?charset=utf8mb4&parseTime=true&loc=Local
+`cmd/rpc/etc/apipro.yaml` (and `cmd/api/etc/apipro.yaml` — both must match):
 
-# Redis (缓存 + 定时刷新)
+```yaml
+# Multi-database MySQL layout (production)
+DBDriver: mysql
+# Empty path — required for cross-schema queries
+DataSource: root:123456@tcp(127.0.0.1:3306)/?charset=utf8mb4&parseTime=true&loc=Local
+SchemaPrefix: "zb_"           # → zb_user.user, zb_live.live_room, zb_chat.chat_room_message
+
+# OR — single-file SQLite (dev)
+# DBDriver: sqlite
+# DataSource: ./data/apipro.db
+# (SchemaPrefix is ignored automatically when DBDriver=sqlite)
+
+# Redis (cache + scheduled refresh + chat history + sessions)
 CacheRedis:
   Host: 127.0.0.1:6399
   Type: node

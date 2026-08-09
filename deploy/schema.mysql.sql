@@ -1,17 +1,33 @@
 -- =====================================================================
--- apipro MySQL schema (production)
--- Matches the backend-zero YuYanTV data model.
+-- apipro MySQL schema (production — multi-database layout)
+--
+-- Mirrors the backend-zero data layout: tables are spread across
+-- multiple MySQL databases (schemas) sharing the "zb_" prefix.
+-- Schema boundaries match backend-zero's haima_* constants:
+--
+--   zb_user  → user, user_grow, room_gift_rank        (haima_user)
+--   zb_live  → live_type, live_room, anchors,
+--              match_schedule, match_schedule_room,
+--              live_hot_recommend                      (haima_live)
+--   zb_chat  → chat_room_message                      (haima_chat)
+--   zb_gift  → (reserved for future gift catalog)     (haima_gift)
+--   zb_admin → (reserved for future admin_user)       (haima_admin)
+--   zb_sys   → (reserved for ads/article/sys-msg)     (haima_sys)
+--
 -- Run:  mysql -u root -p < deploy/schema.mysql.sql
+--
+-- The application DSN must NOT pin a specific database (e.g. use
+-- `root:pass@tcp(127.0.0.1:3306)/?...` — note the empty path) so the
+-- cross-schema JOINs emitted by the model layer work transparently.
 -- =====================================================================
 
-CREATE DATABASE IF NOT EXISTS apipro DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE apipro;
 
 -- ---------------------------------------------------------------------
--- users (audience + anchors; user_type distinguishes them)
---   password stores md5(md5(plain_password) + salt)  — pwd_type=2 only
---   salt = base64(32 random bytes) = 44 ASCII chars
+-- zb_user — user identity, growth tiers, gift-contribution aggregates
 -- ---------------------------------------------------------------------
+CREATE DATABASE IF NOT EXISTS `zb_user` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `zb_user`;
+
 CREATE TABLE IF NOT EXISTS `user` (
   `uid`          BIGINT       NOT NULL COMMENT 'unique user id',
   `login_name`   VARCHAR(64)  NOT NULL DEFAULT '',
@@ -36,9 +52,6 @@ CREATE TABLE IF NOT EXISTS `user` (
   UNIQUE KEY `uk_loginname` (`login_name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='users';
 
--- ---------------------------------------------------------------------
--- user_grow (level lookup)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `user_grow` (
   `id`             BIGINT       NOT NULL AUTO_INCREMENT,
   `name`           VARCHAR(32)  NOT NULL DEFAULT '',
@@ -49,11 +62,25 @@ CREATE TABLE IF NOT EXISTS `user_grow` (
   KEY `idx_min_grow` (`min_grow`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='user grow levels';
 
+CREATE TABLE IF NOT EXISTS `room_gift_rank` (
+  `room_num`       VARCHAR(16)  NOT NULL,
+  `uid`            BIGINT       NOT NULL,
+  `nick_name`      VARCHAR(64)  NOT NULL DEFAULT '',
+  `icon`           VARCHAR(255) NOT NULL DEFAULT '',
+  `score`          BIGINT       NOT NULL DEFAULT 0 COMMENT 'contribution',
+  `rank_no`        INT          NOT NULL DEFAULT 0,
+  `last_send_time` DATETIME     NULL,
+  PRIMARY KEY (`room_num`, `uid`),
+  KEY `idx_rank` (`room_num`, `rank_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='room gift rank';
+
+
 -- ---------------------------------------------------------------------
--- live_type (直播分类 — top-level + child)
---   parent_id=0 = top-level; child rows have parent_id pointing to a top-level row.
---   Top-level live_type_id: 1=football, 2=basketball, 5=analysis
+-- zb_live — live type catalog, rooms, anchor profiles, match schedule
 -- ---------------------------------------------------------------------
+CREATE DATABASE IF NOT EXISTS `zb_live` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `zb_live`;
+
 CREATE TABLE IF NOT EXISTS `live_type` (
   `live_type_id`   INT          NOT NULL COMMENT 'PK; top-level: 1,2,5; child: 20 (analysis child), etc.',
   `parent_id`      INT          NOT NULL DEFAULT 0 COMMENT '0=top-level',
@@ -65,12 +92,8 @@ CREATE TABLE IF NOT EXISTS `live_type` (
   KEY `idx_parent_status` (`parent_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='live types';
 
--- ---------------------------------------------------------------------
--- anchors (anchor extra info — user table holds nick/icon; this holds
--- room_num, detail, notice, cut_out_icon)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `anchors` (
-  `uid`          BIGINT       NOT NULL COMMENT 'FK → user.uid',
+  `uid`          BIGINT       NOT NULL COMMENT 'FK → zb_user.user.uid',
   `nick_name`    VARCHAR(64)  NOT NULL DEFAULT '',
   `icon`         VARCHAR(255) NOT NULL DEFAULT '',
   `cut_out_icon` VARCHAR(255) NOT NULL DEFAULT '',
@@ -88,11 +111,8 @@ CREATE TABLE IF NOT EXISTS `anchors` (
   KEY `idx_hot` (`hot`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='anchor profile';
 
--- ---------------------------------------------------------------------
--- live_room (直播间)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `live_room` (
-  `uid`                       BIGINT       NOT NULL COMMENT 'FK → user.uid (anchor)',
+  `uid`                       BIGINT       NOT NULL COMMENT 'FK → zb_user.user.uid (anchor)',
   `room_num`                  VARCHAR(16)  NOT NULL,
   `title`                     VARCHAR(200) NOT NULL DEFAULT '',
   `contact`                   VARCHAR(128) NOT NULL DEFAULT '',
@@ -123,9 +143,6 @@ CREATE TABLE IF NOT EXISTS `live_room` (
   KEY `idx_live_type_parent` (`live_type_parent`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='live rooms';
 
--- ---------------------------------------------------------------------
--- match_schedule (赛程/比赛)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `match_schedule` (
   `schedule_id`        BIGINT       NOT NULL,
   `host_name`          VARCHAR(64)  NOT NULL DEFAULT '',
@@ -149,9 +166,6 @@ CREATE TABLE IF NOT EXISTS `match_schedule` (
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='match schedule';
 
--- ---------------------------------------------------------------------
--- match_schedule_room (match ↔ room link)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `match_schedule_room` (
   `schedule_id`   BIGINT       NOT NULL,
   `room_num`      VARCHAR(16)  NOT NULL,
@@ -160,9 +174,6 @@ CREATE TABLE IF NOT EXISTS `match_schedule_room` (
   KEY `idx_room` (`room_num`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='match ↔ room link';
 
--- ---------------------------------------------------------------------
--- live_hot_recommend (homepage hot rooms)
--- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `live_hot_recommend` (
   `id`          BIGINT       NOT NULL AUTO_INCREMENT,
   `room_num`    VARCHAR(16)  NOT NULL,
@@ -176,24 +187,13 @@ CREATE TABLE IF NOT EXISTS `live_hot_recommend` (
   KEY `idx_status_time` (`status`, `begin_time`, `end_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='live hot recommend';
 
--- ---------------------------------------------------------------------
--- room_gift_rank (room gift contribution leaderboard)
--- ---------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `room_gift_rank` (
-  `room_num`       VARCHAR(16)  NOT NULL,
-  `uid`            BIGINT       NOT NULL,
-  `nick_name`      VARCHAR(64)  NOT NULL DEFAULT '',
-  `icon`           VARCHAR(255) NOT NULL DEFAULT '',
-  `score`          BIGINT       NOT NULL DEFAULT 0 COMMENT 'contribution',
-  `rank_no`        INT          NOT NULL DEFAULT 0,
-  `last_send_time` DATETIME     NULL,
-  PRIMARY KEY (`room_num`, `uid`),
-  KEY `idx_rank` (`room_num`, `rank_no`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='room gift rank';
 
 -- ---------------------------------------------------------------------
--- chat_room_message (live-room chat history)
+-- zb_chat — live-room chat history
 -- ---------------------------------------------------------------------
+CREATE DATABASE IF NOT EXISTS `zb_chat` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE `zb_chat`;
+
 CREATE TABLE IF NOT EXISTS `chat_room_message` (
   `chat_room_message_id`  BIGINT       NOT NULL,
   `send_uid`              BIGINT       NOT NULL DEFAULT 0,
@@ -208,11 +208,36 @@ CREATE TABLE IF NOT EXISTS `chat_room_message` (
   KEY `idx_room_time` (`room_num`, `send_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='chat room messages';
 
+
+-- ---------------------------------------------------------------------
+-- zb_gift — reserved for the gift catalog (haima_gift.gift in backend-zero).
+-- Not currently used by apipro; created so the schema prefix is complete.
+-- ---------------------------------------------------------------------
+CREATE DATABASE IF NOT EXISTS `zb_gift` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------------------
+-- zb_admin — reserved for admin users (haima_admin.admin_user).
+-- Not currently used by apipro; created so the schema prefix is complete.
+-- ---------------------------------------------------------------------
+CREATE DATABASE IF NOT EXISTS `zb_admin` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+
+-- ---------------------------------------------------------------------
+-- zb_sys — reserved for system messages / ads / articles
+-- (haima_sys.advertising / article / system_chat_message /
+--  system_notice_message in backend-zero).
+-- Not currently used by apipro; created so the schema prefix is complete.
+-- ---------------------------------------------------------------------
+CREATE DATABASE IF NOT EXISTS `zb_sys` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+
 -- =====================================================================
 -- Seed data
 -- =====================================================================
 
 -- Live types (top-level: 1=football, 2=basketball, 5=analysis)
+USE `zb_live`;
 INSERT INTO `live_type` (`live_type_id`,`parent_id`,`type_name`,`icon`,`status`,`sort`) VALUES
  (1, 0, 'Bóng đá',   'https://sta.ncctrials.com/file/ico/football.png',   1, 100),
  (2, 0, 'Bóng rổ',   'https://sta.ncctrials.com/file/ico/basketball.png', 1, 90),
@@ -220,6 +245,7 @@ INSERT INTO `live_type` (`live_type_id`,`parent_id`,`type_name`,`icon`,`status`,
 ON DUPLICATE KEY UPDATE `type_name`=VALUES(`type_name`);
 
 -- Anchor users (user_type=2)
+USE `zb_user`;
 INSERT INTO `user` (`uid`,`login_name`,`nick_name`,`phone`,`country_code`,`password`,`salt`,`pwd_type`,`user_type`,`score`,`grow`,`status`,`icon`,`gender`,`plat`,`created_at`,`updated_at`) VALUES
  (1001, 'anchor1001', 'Cá Mực FM', '13800138001', '86', '', '', 2, 2, 0, 100, 1, 'https://sta.ncctrials.com/file/avatar/a1001.png', 1, 4, UNIX_TIMESTAMP(), UNIX_TIMESTAMP()),
  (1002, 'anchor1002', 'NBA Boy',   '13800138002', '86', '', '', 2, 2, 0, 200, 1, 'https://sta.ncctrials.com/file/avatar/a1002.png', 1, 4, UNIX_TIMESTAMP(), UNIX_TIMESTAMP()),
@@ -227,6 +253,7 @@ INSERT INTO `user` (`uid`,`login_name`,`nick_name`,`phone`,`country_code`,`passw
 ON DUPLICATE KEY UPDATE `nick_name`=VALUES(`nick_name`);
 
 -- Anchor extra profile
+USE `zb_live`;
 INSERT INTO `anchors` (`uid`,`nick_name`,`icon`,`cut_out_icon`,`intro`,`fans`,`follow`,`hot`,`room_num`,`detail`,`notice`,`live`,`created_at`) VALUES
  (1001, 'Cá Mực FM', 'https://sta.ncctrials.com/file/avatar/a1001.png', '', 'Ngoại hạng Anh mỗi tối', 128000, 98000, 9527, '1001', 'Livestream Ngoại hạng Anh mỗi tối 20:00', 'No spam', 1, UNIX_TIMESTAMP()),
  (1002, 'NBA Boy',   'https://sta.ncctrials.com/file/avatar/a1002.png', '', 'NBA / CBA analyst',       86000,  64000, 7610, '1002', 'NBA stream',                          'Be civil', 1, UNIX_TIMESTAMP()),
@@ -266,6 +293,7 @@ ON DUPLICATE KEY UPDATE `room_json`=VALUES(`room_json`);
 -- AUDIT-022: uids reference existing users (5001=demo_user, 1001/1002=anchors)
 -- so the LEFT JOIN user returns fresh nick/icon instead of falling back to
 -- the stale denormalized columns.
+USE `zb_user`;
 INSERT INTO `room_gift_rank` (`room_num`,`uid`,`nick_name`,`icon`,`score`,`rank_no`) VALUES
  ('1001', 5001, 'demo_user', 'https://sta.ncctrials.com/file/avatar/demo.png', 18820, 1),
  ('1001', 1001, 'Cá Mực FM', 'https://sta.ncctrials.com/file/avatar/a1001.png', 12330, 2),

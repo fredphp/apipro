@@ -1,9 +1,12 @@
 -- =====================================================================
--- apipro SQLite schema (dev / self-check)
--- Mirror of the MySQL schema, adapted for SQLite.
--- The application auto-creates these tables on startup if missing.
+-- apipro SQLite schema (dev / self-check, embedded copy)
+-- Mirror of deploy/schema.sqlite.sql. Auto-applied on startup when
+-- DBDriver=sqlite. Single-file layout — all tables live in one .db file;
+-- see deploy/schema.mysql.sql for the production multi-database layout
+-- (zb_user / zb_live / zb_chat / ...).
 -- =====================================================================
 
+-- (in zb_user) registered users + guests (password = client md5 hash)
 CREATE TABLE IF NOT EXISTS user (
   uid          INTEGER PRIMARY KEY,
   login_name   TEXT NOT NULL DEFAULT '',
@@ -27,6 +30,7 @@ CREATE TABLE IF NOT EXISTS user (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_phone ON user(country_code, phone);
 CREATE UNIQUE INDEX IF NOT EXISTS uk_loginname ON user(login_name);
 
+-- (in zb_user) user grow level lookup
 CREATE TABLE IF NOT EXISTS user_grow (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   name      TEXT NOT NULL DEFAULT '',
@@ -36,6 +40,7 @@ CREATE TABLE IF NOT EXISTS user_grow (
 );
 CREATE INDEX IF NOT EXISTS idx_min_grow ON user_grow(min_grow);
 
+-- (in zb_live) live type catalog (top-level + child)
 CREATE TABLE IF NOT EXISTS live_type (
   live_type_id INTEGER PRIMARY KEY,
   parent_id    INTEGER NOT NULL DEFAULT 0,
@@ -46,6 +51,7 @@ CREATE TABLE IF NOT EXISTS live_type (
 );
 CREATE INDEX IF NOT EXISTS idx_lt_parent_status ON live_type(parent_id, status);
 
+-- (in zb_live) anchor extra profile (base user info lives in zb_user.user)
 CREATE TABLE IF NOT EXISTS anchors (
   uid          INTEGER PRIMARY KEY,
   nick_name    TEXT NOT NULL DEFAULT '',
@@ -64,6 +70,7 @@ CREATE TABLE IF NOT EXISTS anchors (
 CREATE INDEX IF NOT EXISTS idx_anchor_room ON anchors(room_num);
 CREATE INDEX IF NOT EXISTS idx_anchor_hot ON anchors(hot);
 
+-- (in zb_live) live rooms
 CREATE TABLE IF NOT EXISTS live_room (
   uid                       INTEGER NOT NULL,
   room_num                  TEXT PRIMARY KEY,
@@ -95,6 +102,7 @@ CREATE INDEX IF NOT EXISTS idx_room_anchor ON live_room(uid);
 CREATE INDEX IF NOT EXISTS idx_room_live ON live_room(live_status, room_status);
 CREATE INDEX IF NOT EXISTS idx_room_ltp ON live_room(live_type_parent);
 
+-- (in zb_live) match schedule (赛程)
 CREATE TABLE IF NOT EXISTS match_schedule (
   schedule_id        INTEGER PRIMARY KEY,
   host_name          TEXT NOT NULL DEFAULT '',
@@ -117,6 +125,7 @@ CREATE INDEX IF NOT EXISTS idx_match_time ON match_schedule(match_time);
 CREATE INDEX IF NOT EXISTS idx_match_ltp ON match_schedule(live_type_parent);
 CREATE INDEX IF NOT EXISTS idx_match_status ON match_schedule(status);
 
+-- (in zb_live) match ↔ room link
 CREATE TABLE IF NOT EXISTS match_schedule_room (
   schedule_id  INTEGER NOT NULL,
   room_num     TEXT NOT NULL,
@@ -125,6 +134,7 @@ CREATE TABLE IF NOT EXISTS match_schedule_room (
 );
 CREATE INDEX IF NOT EXISTS idx_msr_room ON match_schedule_room(room_num);
 
+-- (in zb_live) homepage hot rooms
 CREATE TABLE IF NOT EXISTS live_hot_recommend (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   room_num    TEXT NOT NULL,
@@ -136,6 +146,7 @@ CREATE TABLE IF NOT EXISTS live_hot_recommend (
 );
 CREATE INDEX IF NOT EXISTS idx_hot_room ON live_hot_recommend(room_num);
 
+-- (in zb_user) room gift contribution leaderboard
 CREATE TABLE IF NOT EXISTS room_gift_rank (
   room_num       TEXT NOT NULL,
   uid            INTEGER NOT NULL,
@@ -148,6 +159,7 @@ CREATE TABLE IF NOT EXISTS room_gift_rank (
 );
 CREATE INDEX IF NOT EXISTS idx_rgr_rank ON room_gift_rank(room_num, rank_no);
 
+-- (in zb_chat) live-room chat history
 CREATE TABLE IF NOT EXISTS chat_room_message (
   chat_room_message_id INTEGER PRIMARY KEY,
   send_uid             INTEGER NOT NULL DEFAULT 0,

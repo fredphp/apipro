@@ -34,8 +34,8 @@ func (m *RoomGiftRankModel) ListTopByRoom(ctx context.Context, roomNum string, l
                         COALESCE(u.nick_name, r.nick_name),
                         COALESCE(u.icon, r.icon),
                         r.score, r.rank_no
-                 FROM room_gift_rank r
-                 LEFT JOIN user u ON u.uid = r.uid
+                 FROM `+Tbl("room_gift_rank")+` r
+                 LEFT JOIN `+Tbl("user")+` u ON u.uid = r.uid
                  WHERE r.room_num=? ORDER BY r.rank_no ASC LIMIT ?`, roomNum, limit)
         if err != nil {
                 return nil, err

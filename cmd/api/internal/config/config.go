@@ -22,9 +22,19 @@ type Config struct {
         DBDriver   string `json:",default=mysql"`
         DataSource string `json:",optional"`
 
+        // SchemaPrefix is the MySQL schema-name prefix used by all qualified
+        // table references (e.g. "zb_" → zb_user.user, zb_live.live_room).
+        // Only meaningful for MySQL; SQLite ignores this (single-file DB).
+        SchemaPrefix string `json:",default=zb_"`
+
         // Transport encryption keys — same as RPC.
-        ApiKeyReq  string `json:",optional"`
-        ApiKeyResp string `json:",optional"`
+        // Per docs/password-login-register.txt:
+        //   Web (plat=3): ApiKeyReq for request, ApiKeyResp for response
+        //   WAP (plat=4): ApiKeyReq for request, ApiKeyRespWap for response
+        //                 (WAP uses the SAME key for req+resp)
+        ApiKeyReq    string `json:",optional"`
+        ApiKeyResp   string `json:",optional"`
+        ApiKeyRespWap string `json:",optional"` // WAP response key; defaults to ApiKeyReq when empty
 
         // App mode: "dev" | "prod" (controls SMS dev bypass).
         // (Mode is inherited from RestConf — use that for go-zero's service mode.)
@@ -32,6 +42,10 @@ type Config struct {
 
         // SMS dev bypass code
         SmsDevBypassCode string `json:",optional"`
+
+        // Kaptcha (image captcha) config — /api/kaptcha
+        KaptchaCodeLen int `json:",default=5"`  // number of chars in the code
+        KaptchaTTL     int `json:",default=300"` // Redis TTL in seconds
 
         // JSONP snapshot directory
         JsonpSnapshotDir string `json:",optional"`

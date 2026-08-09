@@ -8,29 +8,29 @@ package model
 // is the "extra profile" denormalized for fast reads.
 
 import (
-	"context"
-	"database/sql"
-	"fmt"
+        "context"
+        "database/sql"
+        "fmt"
 )
 
 type Anchor struct {
-	UID        int64
-	NickName   string
-	Icon       string
-	CutOutIcon string
-	Intro      string
-	Fans       int64
-	Follow     int64
-	Hot        int64
-	RoomNum    string
-	Detail     string
-	Notice     string
-	Live       bool
-	CreatedAt  int64
+        UID        int64
+        NickName   string
+        Icon       string
+        CutOutIcon string
+        Intro      string
+        Fans       int64
+        Follow     int64
+        Hot        int64
+        RoomNum    string
+        Detail     string
+        Notice     string
+        Live       bool
+        CreatedAt  int64
 }
 
 type AnchorModel struct {
-	db *sql.DB
+        db *sql.DB
 }
 
 func NewAnchorModel(db *sql.DB) *AnchorModel { return &AnchorModel{db: db} }
@@ -38,66 +38,66 @@ func NewAnchorModel(db *sql.DB) *AnchorModel { return &AnchorModel{db: db} }
 const anchorCols = `uid, nick_name, icon, cut_out_icon, intro, fans, follow, hot, room_num, detail, notice, live, created_at`
 
 func (m *AnchorModel) ListAll(ctx context.Context) ([]Anchor, error) {
-	rows, err := m.db.QueryContext(ctx, `SELECT `+anchorCols+` FROM anchors ORDER BY hot DESC`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanAnchors(rows)
+        rows, err := m.db.QueryContext(ctx, `SELECT `+anchorCols+` FROM `+Tbl("anchors")+` ORDER BY hot DESC`)
+        if err != nil {
+                return nil, err
+        }
+        defer rows.Close()
+        return scanAnchors(rows)
 }
 
 func (m *AnchorModel) ListHot(ctx context.Context, limit int) ([]Anchor, error) {
-	if limit <= 0 {
-		limit = 6
-	}
-	rows, err := m.db.QueryContext(ctx, `SELECT `+anchorCols+` FROM anchors ORDER BY hot DESC LIMIT ?`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	return scanAnchors(rows)
+        if limit <= 0 {
+                limit = 6
+        }
+        rows, err := m.db.QueryContext(ctx, `SELECT `+anchorCols+` FROM `+Tbl("anchors")+` ORDER BY hot DESC LIMIT ?`, limit)
+        if err != nil {
+                return nil, err
+        }
+        defer rows.Close()
+        return scanAnchors(rows)
 }
 
 func (m *AnchorModel) FindByUid(ctx context.Context, uid int64) (*Anchor, error) {
-	row := m.db.QueryRowContext(ctx, `SELECT `+anchorCols+` FROM anchors WHERE uid=?`, uid)
-	return scanAnchor(row)
+        row := m.db.QueryRowContext(ctx, `SELECT `+anchorCols+` FROM `+Tbl("anchors")+` WHERE uid=?`, uid)
+        return scanAnchor(row)
 }
 
 func (m *AnchorModel) FindByRoomNum(ctx context.Context, roomNum string) (*Anchor, error) {
-	row := m.db.QueryRowContext(ctx, `SELECT `+anchorCols+` FROM anchors WHERE room_num=?`, roomNum)
-	return scanAnchor(row)
+        row := m.db.QueryRowContext(ctx, `SELECT `+anchorCols+` FROM `+Tbl("anchors")+` WHERE room_num=?`, roomNum)
+        return scanAnchor(row)
 }
 
 func scanAnchor(row *sql.Row) (*Anchor, error) {
-	var a Anchor
-	var live int32
-	err := row.Scan(&a.UID, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
-		&a.Fans, &a.Follow, &a.Hot, &a.RoomNum, &a.Detail, &a.Notice, &live, &a.CreatedAt)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrNotFound
-		}
-		return nil, err
-	}
-	a.Live = live != 0
-	return &a, nil
+        var a Anchor
+        var live int32
+        err := row.Scan(&a.UID, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
+                &a.Fans, &a.Follow, &a.Hot, &a.RoomNum, &a.Detail, &a.Notice, &live, &a.CreatedAt)
+        if err != nil {
+                if err == sql.ErrNoRows {
+                        return nil, ErrNotFound
+                }
+                return nil, err
+        }
+        a.Live = live != 0
+        return &a, nil
 }
 
 func scanAnchors(rows *sql.Rows) ([]Anchor, error) {
-	var out []Anchor
-	for rows.Next() {
-		var a Anchor
-		var live int32
-		if err := rows.Scan(&a.UID, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
-			&a.Fans, &a.Follow, &a.Hot, &a.RoomNum, &a.Detail, &a.Notice, &live, &a.CreatedAt); err != nil {
-			return nil, err
-		}
-		a.Live = live != 0
-		out = append(out, a)
-	}
-	return out, rows.Err()
+        var out []Anchor
+        for rows.Next() {
+                var a Anchor
+                var live int32
+                if err := rows.Scan(&a.UID, &a.NickName, &a.Icon, &a.CutOutIcon, &a.Intro,
+                        &a.Fans, &a.Follow, &a.Hot, &a.RoomNum, &a.Detail, &a.Notice, &live, &a.CreatedAt); err != nil {
+                        return nil, err
+                }
+                a.Live = live != 0
+                out = append(out, a)
+        }
+        return out, rows.Err()
 }
 
 func (a *Anchor) DebugString() string {
-	return fmt.Sprintf("uid=%d nick=%s room=%s live=%v", a.UID, a.NickName, a.RoomNum, a.Live)
+        return fmt.Sprintf("uid=%d nick=%s room=%s live=%v", a.UID, a.NickName, a.RoomNum, a.Live)
 }
