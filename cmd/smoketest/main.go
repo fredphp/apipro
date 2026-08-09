@@ -57,6 +57,13 @@ func main() {
 		json.Unmarshal(regResp.Result, &result)
 		if sid, ok := result["sessionId"]; ok {
 			fmt.Printf("    result.sessionId=%v OK\n", sid)
+			// SPEC CHECK: common_result.new_session_id must equal result.sessionId
+			// (both carry the server-issued access token, not the client's guest session).
+			if regResp.CommonResult.NewSessionId != "" && regResp.CommonResult.NewSessionId == sid.(string) {
+				fmt.Printf("    SPEC CHECK: new_session_id == result.sessionId ✓\n")
+			} else if regResp.CommonResult.NewSessionId != "" {
+				fmt.Printf("    SPEC CHECK FAIL: new_session_id=%q != result.sessionId=%v\n", regResp.CommonResult.NewSessionId, sid)
+			}
 		}
 		fmt.Println()
 	}
@@ -78,6 +85,12 @@ func main() {
 		json.Unmarshal(loginResp.Result, &result)
 		if sid, ok := result["sessionId"]; ok {
 			fmt.Printf("    result.sessionId=%v OK\n", sid)
+			// SPEC CHECK: common_result.new_session_id must equal result.sessionId
+			if loginResp.CommonResult.NewSessionId != "" && loginResp.CommonResult.NewSessionId == sid.(string) {
+				fmt.Printf("    SPEC CHECK: new_session_id == result.sessionId ✓\n")
+			} else if loginResp.CommonResult.NewSessionId != "" {
+				fmt.Printf("    SPEC CHECK FAIL: new_session_id=%q != result.sessionId=%v\n", loginResp.CommonResult.NewSessionId, sid)
+			}
 		}
 		fmt.Println()
 	}

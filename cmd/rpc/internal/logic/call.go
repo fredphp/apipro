@@ -122,7 +122,54 @@ func (l *CallLogic) Call(in *apipro.CallReq) (*apipro.CallResp, error) {
         if code == CodeOK && in.SessionId != "" {
                 resp.NewSessionId = in.SessionId
         }
+        // BUG-FIX (spec compliance): for auth methods that issue a NEW session,
+        // common_result.new_session_id must carry the server-issued access token
+        // (per fy.proto COMMON_RESULT.new_session_id "for rotation"), NOT the
+        // client's old guest session ID (which is what in.SessionId holds for
+        // login/register/guestLogin/refresh).
+        //
+        // The new access token is already inside the result JSON (AuthResponse.
+        // SessionID = sess.AccessToken). Extract it and override NewSessionId
+        // so both common_result.new_session_id AND result.sessionId carry the
+        // same new token. Non-auth methods keep the echo-session behavior.
+        if code == CodeOK && isAuthMethod(method) {
+                if newSID := extractResultSessionID(result); newSID != "" {
+                        resp.NewSessionId = newSID
+                }
+        }
         return resp, nil
+}
+
+// isAuthMethod reports whether the method issues a new server session.
+// login/register/guestLogin/refresh all return a fresh access token in the
+// result JSON; logout and user_detail do NOT issue a new session.
+func isAuthMethod(method string) bool {
+        switch method {
+        case "login", "register", "guestLogin", "refresh":
+                return true
+        }
+        return false
+}
+
+// extractResultSessionID parses the auth result JSON and returns the new
+// session ID. Tries "sessionId" first (per doc step 16), falls back to
+// "accessToken". Returns "" if not found or parse fails (e.g. error responses
+// where result is nil).
+func extractResultSessionID(result json.RawMessage) string {
+        if len(result) == 0 {
+                return ""
+        }
+        var m struct {
+                SessionID   string `json:"sessionId"`
+                AccessToken string `json:"accessToken"`
+        }
+        if err := json.Unmarshal(result, &m); err != nil {
+                return ""
+        }
+        if m.SessionID != "" {
+                return m.SessionID
+        }
+        return m.AccessToken
 }
 
 // =============================================================
