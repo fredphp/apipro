@@ -5,6 +5,7 @@ package db
 // For SQLite, the schema is auto-created from deploy/schema.sqlite.sql on open.
 
 import (
+        "context"
         "database/sql"
         _ "embed"
         "fmt"
@@ -51,8 +52,21 @@ func New(driver, dsn string) (*sql.DB, error) {
         db.SetConnMaxLifetime(30 * time.Minute)
         db.SetConnMaxIdleTime(5 * time.Minute)
 
-        if err := db.Ping(); err != nil {
-                return nil, fmt.Errorf("db: ping %s: %w", driver, err)
+        // Use a short timeout for the ping so startup doesn't hang for 2+
+        // minutes (default TCP SYN retry) when MySQL is temporarily unreachable.
+        pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+        defer pingCancel()
+        if err := db.PingContext(pingCtx); err != nil {
+                if driver == "mysql" {
+                        // Non-fatal: log and continue with lazy connect. The *sql.DB pool
+                        // will retry connections on actual queries, so the service starts
+                        // immediately and recovers automatically when the DB becomes
+                        // reachable. Without this, the API server never reaches
+                        // server.Start() and never binds its HTTP port while MySQL is down.
+                        logx.Errorf("db: ping %s failed (continuing with lazy connect; queries will fail until DB is reachable): %v", driver, err)
+                } else {
+                        return nil, fmt.Errorf("db: ping %s: %w", driver, err)
+                }
         }
 
         // SQLite: auto-apply schema (idempotent — all CREATE TABLE IF NOT EXISTS).

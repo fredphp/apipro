@@ -88,7 +88,14 @@ func NewServiceContext(c config.Config) *ServiceContext {
         //   - Per-schema-pool mode (optional): each schema gets its own pool.
         // Models that do cross-schema JOINs use mdb.Shared(); single-schema
         // models use mdb.ForSchema(shortName).
-        mdb := db.MustNewMultiDB(c.DBDriver, c.DataSource, c.Databases)
+        // Build the multi-database connection manager.
+        // Uses non-Must version so a DB init failure doesn't crash the RPC
+        // process — the service starts and recovers when the DB becomes
+        // reachable (lazy connect via *sql.DB).
+        mdb, dbErr := db.NewMultiDB(c.DBDriver, c.DataSource, c.Databases)
+        if dbErr != nil {
+                logx.Errorf("svc: db init failed (models will use lazy-connect; queries will fail until DB is reachable): %v", dbErr)
+        }
 
         // Wire models to the appropriate connection pool:
         //   - match_model, live_room_model, room_gift_rank_model → Shared()
@@ -97,6 +104,11 @@ func NewServiceContext(c config.Config) *ServiceContext {
         //   - user_model, anchor_model, live_type_model, chat_room_message_model
         //     → ForSchema() (single-schema; falls back to Shared() when no
         //     per-schema pool is configured)
+        //
+        // MultiDB methods (Shared/ForSchema) handle nil receivers by returning
+        // nil, so model constructors receive nil *sql.DB when DB init failed.
+        // Models won't panic at construction — only at query time (which
+        // returns a proper SQL error, not a crash).
         models := &Models{
                 Users:        model.NewUserModel(mdb.ForSchema("user")),
                 Anchors:      model.NewAnchorModel(mdb.ForSchema("live")),
@@ -116,11 +128,18 @@ func NewServiceContext(c config.Config) *ServiceContext {
         sms := NewSmsStore(rdb, c.AppMode, c.SmsDevBypassCode)
 
         // Bootstrap chat message ID counter from DB.
-        bootChatMsgIDCounter(context.Background(), rdb, models.ChatMessages)
+        // Use a bounded timeout so startup doesn't hang for minutes when MySQL
+        // is temporarily unreachable. The boot is best-effort — if it fails,
+        // the Redis counter starts from 0 (or its previous value) and INCR
+        // still works; chat message IDs just might not be contiguous with
+        // pre-restart ones.
+        bootCtx, bootCancel := context.WithTimeout(context.Background(), 10*time.Second)
+        defer bootCancel()
+        bootChatMsgIDCounter(bootCtx, rdb, models.ChatMessages)
 
         // AUDIT-008: bootstrap UID counter from MAX(uid) so the first INCR
         // returns a value strictly greater than any existing uid.
-        bootUIDCounter(context.Background(), rdb, models.Users)
+        bootUIDCounter(bootCtx, rdb, models.Users)
 
         // AllocUID reserves a new uid atomically via Redis INCR. Falls back to
         // the DB-based NextUID if Redis is unavailable (best-effort).
