@@ -78,17 +78,33 @@ func NewServiceContext(c config.Config) *ServiceContext {
                 if p := strings.TrimSpace(c.SchemaPrefix); p != "" {
                         model.SetSchemaPrefix(p)
                 }
+                if p := strings.TrimSpace(c.EimSchemaPrefix); p != "" {
+                        model.SetEimSchemaPrefix(p)
+                }
         }
 
-        sqlDB := db.MustNew(c.DBDriver, c.DataSource)
+        // Build the multi-database connection manager.
+        //   - Shared-pool mode (default): single *sql.DB, cross-schema JOINs work.
+        //   - Per-schema-pool mode (optional): each schema gets its own pool.
+        // Models that do cross-schema JOINs use mdb.Shared(); single-schema
+        // models use mdb.ForSchema(shortName).
+        mdb := db.MustNewMultiDB(c.DBDriver, c.DataSource, c.Databases)
+
+        // Wire models to the appropriate connection pool:
+        //   - match_model, live_room_model, room_gift_rank_model → Shared()
+        //     (they do cross-schema JOINs: zb_live.match_schedule JOIN
+        //      zb_user.user JOIN zb_live.live_room)
+        //   - user_model, anchor_model, live_type_model, chat_room_message_model
+        //     → ForSchema() (single-schema; falls back to Shared() when no
+        //     per-schema pool is configured)
         models := &Models{
-                Users:        model.NewUserModel(sqlDB),
-                Anchors:      model.NewAnchorModel(sqlDB),
-                Rooms:        model.NewLiveRoomModel(sqlDB),
-                Matches:      model.NewMatchModel(sqlDB),
-                LiveTypes:    model.NewLiveTypeModel(sqlDB),
-                GiftRanks:    model.NewRoomGiftRankModel(sqlDB),
-                ChatMessages: model.NewChatRoomMessageModel(sqlDB),
+                Users:        model.NewUserModel(mdb.ForSchema("user")),
+                Anchors:      model.NewAnchorModel(mdb.ForSchema("live")),
+                Rooms:        model.NewLiveRoomModel(mdb.Shared()), // cross-schema JOINs
+                Matches:      model.NewMatchModel(mdb.Shared()),    // cross-schema JOINs
+                LiveTypes:    model.NewLiveTypeModel(mdb.ForSchema("live")),
+                GiftRanks:    model.NewRoomGiftRankModel(mdb.Shared()), // JOINs user.room_gift_rank + user.user
+                ChatMessages: model.NewChatRoomMessageModel(mdb.ForSchema("chat")),
         }
 
         // Sessions (Redis-backed opaque tokens).
