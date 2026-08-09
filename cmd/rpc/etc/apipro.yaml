@@ -10,7 +10,7 @@ AppMode: dev
 #
 
 DBDriver: mysql
-DataSource: root:vgyhnB.09@tcp(3.1.198.77:3306)/?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
+DataSource: root:80DC24@2705e@tcp(54.251.241.85:3306)/?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
 # SQLite fallback (single-file, all tables in one DB — schema prefix is
 # ignored automatically when DBDriver=sqlite):
 # DBDriver: sqlite
@@ -23,7 +23,7 @@ EimSchemaPrefix: "eim_"
 # Redis (cache + scheduled refresh + chat history + sessions)
 # ============================================================
 CacheRedis:
-  Host: 127.0.0.1:6399
+  Host: 127.0.0.1:6379
   Type: node
 
 # ============================================================

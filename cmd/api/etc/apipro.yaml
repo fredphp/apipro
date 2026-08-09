@@ -24,7 +24,7 @@ Redis:
 # ============================================================
 
 DBDriver: mysql
-DataSource: root:vgyhnB.09@tcp(3.1.198.77:3306)/?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
+DataSource: root:80DC24@2705e@tcp(54.251.241.85:3306)/?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
 # DBDriver: sqlite
 # DataSource: ./data/apipro.db
 SchemaPrefix: "zb_"
