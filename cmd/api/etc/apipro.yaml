@@ -16,77 +16,15 @@ ApiproRpc:
 # Redis (sessions + rate limit + chat history + shared cache)
 # ============================================================
 Redis:
-  Host: 127.0.0.1:6399
+  Host: 127.0.0.1:6379
   Type: node
 
 # ============================================================
 # Multi-Database Configuration (MySQL)
 # ============================================================
-# Production uses a multi-database MySQL layout. Your MySQL server
-# (e.g. the "soco" connection) contains these application schemas:
-#
-#   Main app (prefix "zb_"):
-#     zb_admin, zb_basketball, zb_chat, zb_football, zb_gift,
-#     zb_live, zb_sys, zb_user
-#
-#   IM-related (prefix "eim_"):
-#     eim_admin, eim_friend, eim_group, eim_user
-#
-# Two configuration modes are supported:
-#
-# ── Mode 1: SHARED-POOL (default, recommended) ──────────────
-#   A single connection pool with NO pinned database. The DSN
-#   path must be EMPTY (note the trailing "/" with nothing after
-#   it). All schemas are accessed via fully-qualified table names
-#   (zb_user.user, zb_live.live_room, eim_user.eim_user, ...) and
-#   cross-schema JOINs work transparently.
-#
-#     DataSource: "root:123456@tcp(127.0.0.1:3306)/?charset=..."
-#     # Databases: omitted (or empty)
-#
-# ── Mode 2: PER-SCHEMA-POOL (optional) ──────────────────────
-#   Each schema group gets its own connection pool pinned to a
-#   specific database. Useful when schemas have different
-#   credentials or when you want connection isolation per schema.
-#   NOTE: cross-schema JOINs still need the shared DataSource
-#   (models that JOIN across schemas use the shared pool).
-#
-#     DataSource: "root:123456@tcp(127.0.0.1:3306)/?charset=..."
-#     Databases:
-#       user:       "root:123456@tcp(127.0.0.1:3306)/zb_user?charset=utf8mb4&parseTime=true&loc=Local"
-#       live:       "root:123456@tcp(127.0.0.1:3306)/zb_live?charset=utf8mb4&parseTime=true&loc=Local"
-#       chat:       "root:123456@tcp(127.0.0.1:3306)/zb_chat?charset=utf8mb4&parseTime=true&loc=Local"
-#       gift:       "root:123456@tcp(127.0.0.1:3306)/zb_gift?charset=utf8mb4&parseTime=true&loc=Local"
-#       admin:      "root:123456@tcp(127.0.0.1:3306)/zb_admin?charset=utf8mb4&parseTime=true&loc=Local"
-#       sys:        "root:123456@tcp(127.0.0.1:3306)/zb_sys?charset=utf8mb4&parseTime=true&loc=Local"
-#       basketball: "root:123456@tcp(127.0.0.1:3306)/zb_basketball?charset=utf8mb4&parseTime=true&loc=Local"
-#       football:   "root:123456@tcp(127.0.0.1:3306)/zb_football?charset=utf8mb4&parseTime=true&loc=Local"
-#       eim_user:   "root:123456@tcp(127.0.0.1:3306)/eim_user?charset=utf8mb4&parseTime=true&loc=Local"
-#       eim_friend: "root:123456@tcp(127.0.0.1:3306)/eim_friend?charset=utf8mb4&parseTime=true&loc=Local"
-#       eim_group:  "root:123456@tcp(127.0.0.1:3306)/eim_group?charset=utf8mb4&parseTime=true&loc=Local"
-#       eim_admin:  "root:123456@tcp(127.0.0.1:3306)/eim_admin?charset=utf8mb4&parseTime=true&loc=Local"
-#
-# SchemaPrefix must match the RPC service so both processes emit
-# the same fully-qualified table names. EimSchemaPrefix covers the
-# IM-related schemas (defaults to "eim_").
-# ============================================================
-# DBDriver: mysql
-# DataSource: root:123456@tcp(127.0.0.1:3306)/?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
-DBDriver: sqlite
-DataSource: ./data/apipro.db
-# Databases:  # uncomment to enable per-schema pools (Mode 2)
-#   user:       "root:123456@tcp(127.0.0.1:3306)/zb_user?charset=utf8mb4&parseTime=true&loc=Local"
-#   live:       "root:123456@tcp(127.0.0.1:3306)/zb_live?charset=utf8mb4&parseTime=true&loc=Local"
-#   chat:       "root:123456@tcp(127.0.0.1:3306)/zb_chat?charset=utf8mb4&parseTime=true&loc=Local"
-#   gift:       "root:123456@tcp(127.0.0.1:3306)/zb_gift?charset=utf8mb4&parseTime=true&loc=Local"
-#   admin:      "root:123456@tcp(127.0.0.1:3306)/zb_admin?charset=utf8mb4&parseTime=true&loc=Local"
-#   sys:        "root:123456@tcp(127.0.0.1:3306)/zb_sys?charset=utf8mb4&parseTime=true&loc=Local"
-#   basketball: "root:123456@tcp(127.0.0.1:3306)/zb_basketball?charset=utf8mb4&parseTime=true&loc=Local"
-#   football:   "root:123456@tcp(127.0.0.1:3306)/zb_football?charset=utf8mb4&parseTime=true&loc=Local"
-#   eim_user:   "root:123456@tcp(127.0.0.1:3306)/eim_user?charset=utf8mb4&parseTime=true&loc=Local"
-#   eim_friend: "root:123456@tcp(127.0.0.1:3306)/eim_friend?charset=utf8mb4&parseTime=true&loc=Local"
-#   eim_group:  "root:123456@tcp(127.0.0.1:3306)/eim_group?charset=utf8mb4&parseTime=true&loc=Local"
-#   eim_admin:  "root:123456@tcp(127.0.0.1:3306)/eim_admin?charset=utf8mb4&parseTime=true&loc=Local"
+
+DBDriver: mysql
+DataSource: root:vgyhnB.09@tcp(3.1.198.77:3306)/?charset=utf8mb4&parseTime=true&loc=Local&allowNativePasswords=true
 # DBDriver: sqlite
 # DataSource: ./data/apipro.db
 SchemaPrefix: "zb_"

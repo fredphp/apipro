@@ -6,9 +6,9 @@ cd "$(dirname "$0")"
 export PATH="$HOME/.local/go/bin:$HOME/.local/bin:$HOME/go/bin:$PATH"
 
 # 1. Redis
-if ! redis-cli -p 6399 ping >/dev/null 2>&1; then
-  echo "starting redis on :6399 ..."
-  redis-server --port 6399 --daemonize yes --save "" --appendonly no
+if ! redis-cli -p 6379 ping >/dev/null 2>&1; then
+  echo "starting redis on :6379 ..."
+  redis-server --port 6379 --daemonize yes --save "" --appendonly no
 fi
 
 # 2. Build
