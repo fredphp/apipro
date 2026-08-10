@@ -40,9 +40,6 @@ func NewServiceContext(c config.Config) *ServiceContext {
                 if p := strings.TrimSpace(c.SchemaPrefix); p != "" {
                         model.SetSchemaPrefix(p)
                 }
-                if p := strings.TrimSpace(c.EimSchemaPrefix); p != "" {
-                        model.SetEimSchemaPrefix(p)
-                }
         }
 
         // Codec keys — fall back to production defaults if unset.
@@ -54,34 +51,24 @@ func NewServiceContext(c config.Config) *ServiceContext {
         if len(respKey) == 0 {
                 respKey = []byte(codec.DefaultResponseKey)
         }
-        // WAP response key — defaults to the request key (per spec, WAP uses
-        // the SAME key for both request and response).
-        wapRespKey := []byte(c.ApiKeyRespWap)
-        if len(wapRespKey) == 0 {
-                wapRespKey = reqKey
-        }
 
         // AUDIT-010/011/012: when a DB DataSource is configured, pass the
         // chat-message, live-room, and user models into the WS hub so chat is
         // persisted to MySQL and room/user-status checks are enforced. When
         // unset, the hub degrades gracefully (Redis-only).
-        //
-        // Multi-database: use MultiDB so per-schema pools are honored when
-        // the Databases map is configured. Models that do cross-schema JOINs
-        // (live_room) use Shared(); single-schema models use ForSchema().
         var (
                 chatMessages *model.ChatRoomMessageModel
                 roomsModel   *model.LiveRoomModel
                 usersModel   *model.UserModel
         )
-        if c.DataSource != "" || len(c.Databases) > 0 {
-                mdb, err := db.NewMultiDB(c.DBDriver, c.DataSource, c.Databases)
+        if c.DataSource != "" {
+                sqlDB, err := db.New(c.DBDriver, c.DataSource)
                 if err != nil {
                         logx.Errorf("svc: db init failed (WS hub will run in Redis-only mode): %v", err)
                 } else {
-                        chatMessages = model.NewChatRoomMessageModel(mdb.ForSchema("chat"))
-                        roomsModel = model.NewLiveRoomModel(mdb.Shared()) // cross-schema JOINs
-                        usersModel = model.NewUserModel(mdb.ForSchema("user"))
+                        chatMessages = model.NewChatRoomMessageModel(sqlDB)
+                        roomsModel = model.NewLiveRoomModel(sqlDB)
+                        usersModel = model.NewUserModel(sqlDB)
                 }
         }
 
@@ -96,9 +83,8 @@ func NewServiceContext(c config.Config) *ServiceContext {
                 AuthLimiter: ratelimit.New(rdb, c.RateLimitAuthPerMinute, "auth"),
                 ChatHub:     hub,
                 Transport: codec.TransportConfig{
-                        RequestKey:     reqKey,
-                        ResponseKey:    respKey,
-                        WapResponseKey: wapRespKey,
+                        RequestKey:  reqKey,
+                        ResponseKey: respKey,
                 },
         }
 }

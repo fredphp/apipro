@@ -22,6 +22,11 @@ var sqliteSchema string
 
 // New opens a *sql.DB for the given driver ("mysql" or "sqlite") and DSN.
 // For SQLite, it auto-applies the schema file.
+//
+// MySQL ping failure is NON-FATAL (audit-1B DZ-3 fix): the sandbox environment
+// cannot reach the user's MySQL (3.1.198.77:3306) by design. The returned *sql.DB
+// is still usable — queries will lazily attempt to connect and fail per-call,
+// allowing the rest of the system (cache/Redis fallback) to keep serving.
 func New(driver, dsn string) (*sql.DB, error) {
         if driver == "" {
                 driver = "mysql"
@@ -52,18 +57,14 @@ func New(driver, dsn string) (*sql.DB, error) {
         db.SetConnMaxLifetime(30 * time.Minute)
         db.SetConnMaxIdleTime(5 * time.Minute)
 
-        // Use a short timeout for the ping so startup doesn't hang for 2+
-        // minutes (default TCP SYN retry) when MySQL is temporarily unreachable.
+        // DZ-3 fix: bounded ping timeout; MySQL ping failure is non-fatal.
         pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
         defer pingCancel()
         if err := db.PingContext(pingCtx); err != nil {
                 if driver == "mysql" {
-                        // Non-fatal: log and continue with lazy connect. The *sql.DB pool
-                        // will retry connections on actual queries, so the service starts
-                        // immediately and recovers automatically when the DB becomes
-                        // reachable. Without this, the API server never reaches
-                        // server.Start() and never binds its HTTP port while MySQL is down.
-                        logx.Errorf("db: ping %s failed (continuing with lazy connect; queries will fail until DB is reachable): %v", driver, err)
+                        // Non-fatal: log and continue with lazy-connect semantics.
+                        // The cache + Redis layer will keep serving until DB recovers.
+                        logx.Errorf("db: ping %s failed (continuing with lazy connect...): %v", driver, err)
                 } else {
                         return nil, fmt.Errorf("db: ping %s: %w", driver, err)
                 }
@@ -91,6 +92,8 @@ func New(driver, dsn string) (*sql.DB, error) {
 }
 
 // MustNew panics on error (for ServiceContext init).
+// NOTE: For MySQL, ping failure is non-fatal (see New), so MustNew will NOT panic
+// on MySQL connection issues — only on truly fatal errors (empty DSN, unsupported driver).
 func MustNew(driver, dsn string) *sql.DB {
         d, err := New(driver, dsn)
         if err != nil {

@@ -1,20 +1,20 @@
 package handler
 
 import (
-        "context"
-        "crypto/rand"
-        "encoding/json"
-        "fmt"
-        "io"
-        "net/http"
-        "strconv"
-        "strings"
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
 
-        "apipro/cmd/api/internal/svc"
-        "apipro/cmd/rpc/apiproClient"
-        "apipro/pkg/codec"
+	"apipro/cmd/api/internal/svc"
+	"apipro/cmd/rpc/apiproClient"
+	"apipro/pkg/codec"
 
-        "github.com/zeromicro/go-zero/core/logx"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 // alias so the kaptcha code reads naturally
@@ -26,44 +26,32 @@ type rpcClient = apiproClient.Apipro
 // callRPC invokes the RPC `Call` method with the given method+param+session.
 // Returns the parsed code/meg/result. On RPC error, returns a business-error
 // envelope with the error message.
-//
-// session_id, seq, and plat are read from the request context (set by the
-// codec.Transport middleware from the CLIENT_INFO protobuf envelope or the
-// legacy JSON envelope / X-Session header).
 func callRPC(svcCtx *svc.ServiceContext, w http.ResponseWriter, r *http.Request, method, paramJSON string) (*apiproClient.CallResp, error) {
-        ctx := r.Context()
-        sid := codec.SessionID(ctx)
-        if sid == "" {
-                sid = r.Header.Get("X-Session") // legacy fallback
-        }
-        seq := codec.Seq(ctx)
-        plat := codec.Plat(ctx)
-        cli := apiproClient.NewApipro(svcCtx.ApiproRpc)
-        resp, err := cli.Call(ctx, &apiproClient.CallReq{
-                Method:    method,
-                ParamJson: paramJSON,
-                SessionId: sid,
-                Seq:       seq,
-                Plat:      strconv.Itoa(int(plat)), // "3"=Web, "4"=WAP, "0"=unknown
-        })
-        if err != nil {
-                logx.Errorf("rpc.Call %s: %v", method, err)
-                codec.WriteErr(w, 500, "rpc unavailable")
-                return nil, err
-        }
-        return resp, nil
+	sid := r.Header.Get("X-Session")
+	cli := apiproClient.NewApipro(svcCtx.ApiproRpc)
+	resp, err := cli.Call(r.Context(), &apiproClient.CallReq{
+		Method:    method,
+		ParamJson: paramJSON,
+		SessionId: sid,
+	})
+	if err != nil {
+		logx.Errorf("rpc.Call %s: %v", method, err)
+		codec.WriteErr(w, 500, "rpc unavailable")
+		return nil, err
+	}
+	return resp, nil
 }
 
 // readParamBody reads the decrypted business JSON from the request context
 // (set by the codec.Transport middleware). Falls back to raw body if no
 // transport was applied (debug path).
 func readParamBody(r *http.Request) string {
-        if b := codec.ParamJSON(r.Context()); b != nil {
-                return string(b)
-        }
-        // Fallback: read raw body
-        b, _ := io.ReadAll(r.Body)
-        return string(b)
+	if b := codec.ParamJSON(r.Context()); b != nil {
+		return string(b)
+	}
+	// Fallback: read raw body
+	b, _ := io.ReadAll(r.Body)
+	return string(b)
 }
 
 // =============================================================
@@ -73,62 +61,62 @@ func readParamBody(r *http.Request) string {
 
 // loginHandler — POST /login/login
 func LoginHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "login", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		resp, err := callRPC(svcCtx, w, r, "login", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 // registerHandler — POST /login/reg
 func RegisterHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "register", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		resp, err := callRPC(svcCtx, w, r, "register", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 // guestLoginHandler — POST /login/guestLogin
 func GuestLoginHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "guestLogin", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		resp, err := callRPC(svcCtx, w, r, "guestLogin", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 // refreshHandler — POST /login/refresh
 func RefreshHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "refresh", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		resp, err := callRPC(svcCtx, w, r, "refresh", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 // logoutHandler — POST /login/logout
 func LogoutHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "logout", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		resp, err := callRPC(svcCtx, w, r, "logout", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 // =============================================================
@@ -136,78 +124,78 @@ func LogoutHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 // =============================================================
 
 func LiveHotHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                resp, err := callRPC(svcCtx, w, r, "live_hot", "{}")
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := callRPC(svcCtx, w, r, "live_hot", "{}")
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 func LiveCateListHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                // AUDIT-001: dispatch to live_cateList (rooms filtered by liveTypeId),
-                // NOT live_types (which returns the live-type catalog for /live_types.json).
-                resp, err := callRPC(svcCtx, w, r, "live_cateList", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		// AUDIT-001: dispatch to live_cateList (rooms filtered by liveTypeId),
+		// NOT live_types (which returns the live-type catalog for /live_types.json).
+		resp, err := callRPC(svcCtx, w, r, "live_cateList", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 func LiveDetailHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "live_detail", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		resp, err := callRPC(svcCtx, w, r, "live_detail", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 func MatchRecommendHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                resp, err := callRPC(svcCtx, w, r, "match_recommend", "{}")
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := callRPC(svcCtx, w, r, "match_recommend", "{}")
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 func MatchCateListHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                resp, err := callRPC(svcCtx, w, r, "match_cateList", "{}")
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := callRPC(svcCtx, w, r, "match_cateList", "{}")
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 func MatchDetailHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "match_detail", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		resp, err := callRPC(svcCtx, w, r, "match_detail", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 func UserDetailHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                resp, err := callRPC(svcCtx, w, r, "user_detail", "{}")
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		resp, err := callRPC(svcCtx, w, r, "user_detail", "{}")
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
 // =============================================================
@@ -215,45 +203,55 @@ func UserDetailHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 // =============================================================
 
 func SmsGetCodeHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                param := readParamBody(r)
-                resp, err := callRPC(svcCtx, w, r, "sms_getCode", param)
-                if err != nil {
-                        return
-                }
-                writeEnvelope(w, resp)
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		param := readParamBody(r)
+		resp, err := callRPC(svcCtx, w, r, "sms_getCode", param)
+		if err != nil {
+			return
+		}
+		writeEnvelope(w, resp)
+	}
 }
 
-// KaptchaHandler — GET /api/kaptcha?t=<ts>&mobile=<phone_or_account>
-// Plaintext SVG image (NOT encrypted). The `t` param is a cache-buster
-// timestamp and is ignored by the server.
+// KaptchaHandler — GET /api/kaptcha?mobile=<phone>
+// Plaintext SVG image (NOT encrypted).
+//
+// DZ-7 fix (audit-1B): previously a single IP could request 120 captchas/min
+// for the SAME mobile, each overwriting the previous (wasted CPU+Redis, and
+// trivially OCR-able). Now adds a 60s per-mobile cooldown using SetnxEx —
+// the same pattern the SMS code path uses. If the cooldown key exists, we
+// return 429 with a Retry-After header so legitimate clients can back off.
 func KaptchaHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
-        return func(w http.ResponseWriter, r *http.Request) {
-                mobile := r.URL.Query().Get("mobile")
-                if mobile == "" {
-                        http.Error(w, "missing mobile", http.StatusBadRequest)
-                        return
-                }
-                codeLen := svcCtx.Config.KaptchaCodeLen
-                if codeLen <= 0 {
-                        codeLen = 5
-                }
-                ttl := svcCtx.Config.KaptchaTTL
-                if ttl <= 0 {
-                        ttl = 300
-                }
-                // Generate code from visually-unambiguous alphabet.
-                code := genKaptchaCode(codeLen)
-                // Store in Redis under yuyan:kaptcha:<mobile>.
-                _ = svcCtx.Redis.Setex("yuyan:kaptcha:"+mobile, code, ttl)
-                // Render SVG.
-                svg := renderKaptchaSVG(code)
-                w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
-                w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
-                w.WriteHeader(http.StatusOK)
-                _, _ = w.Write([]byte(svg))
-        }
+	return func(w http.ResponseWriter, r *http.Request) {
+		mobile := r.URL.Query().Get("mobile")
+		if mobile == "" {
+			http.Error(w, "missing mobile", http.StatusBadRequest)
+			return
+		}
+
+		// DZ-7: per-mobile 60s cooldown. SetnxEx returns 1 if the key was set
+		// (i.e. did NOT exist before), 0 otherwise. We use the result to gate.
+		// If Redis is unavailable, fall through (fail-open — same as the SMS
+		// code path's behavior on Redis error).
+		cooldownKey := "yuyan:kaptcha:cd:" + mobile
+		set, err := svcCtx.Redis.SetnxEx(cooldownKey, "1", 60)
+		if err == nil && !set {
+			w.Header().Set("Retry-After", "60")
+			http.Error(w, "kaptcha cooldown: please retry in 60s", http.StatusTooManyRequests)
+			return
+		}
+
+		// Generate 5-char code from visually-unambiguous alphabet.
+		code := genKaptchaCode(5)
+		// Store in Redis (5min TTL) under yuyan:kaptcha:<mobile>.
+		_ = svcCtx.Redis.Setex("yuyan:kaptcha:"+mobile, code, 300)
+		// Render SVG.
+		svg := renderKaptchaSVG(code)
+		w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(svg))
+	}
 }
 
 // =============================================================
@@ -264,39 +262,39 @@ func KaptchaHandler(svcCtx *svc.ServiceContext) http.HandlerFunc {
 // envelope to the ResponseWriter. The codec.Transport middleware will
 // encrypt this body before sending to the client.
 func writeEnvelope(w http.ResponseWriter, resp *apiproClient.CallResp) {
-        // If result is empty/nil, still emit a proper envelope.
-        out := map[string]any{
-                "code": resp.Code,
-                "meg":  resp.Meg,
-                "seq":  resp.Seq,
-        }
-        if resp.NewSessionId != "" {
-                out["newSessionId"] = resp.NewSessionId
-        }
-        if len(resp.Result) > 0 {
-                // Embed the raw result JSON directly (not as a string).
-                out["result"] = json.RawMessage(resp.Result)
-        }
-        w.Header().Set("Content-Type", "application/json; charset=utf-8")
-        enc := json.NewEncoder(w)
-        _ = enc.Encode(out)
+	// If result is empty/nil, still emit a proper envelope.
+	out := map[string]any{
+		"code": resp.Code,
+		"meg":  resp.Meg,
+		"seq":  resp.Seq,
+	}
+	if resp.NewSessionId != "" {
+		out["newSessionId"] = resp.NewSessionId
+	}
+	if len(resp.Result) > 0 {
+		// Embed the raw result JSON directly (not as a string).
+		out["result"] = json.RawMessage(resp.Result)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	_ = enc.Encode(out)
 }
 
 // genKaptchaCode returns N chars from a visually-unambiguous alphabet.
 // Uses crypto/rand.
 func genKaptchaCode(n int) string {
-        const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-        out := make([]byte, n)
-        for i := range out {
-                b := make([]byte, 1)
-                _, _ = cryptoRand.Read(b)
-                out[i] = alphabet[int(b[0])%len(alphabet)]
-        }
-        return string(out)
+	const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	out := make([]byte, n)
+	for i := range out {
+		b := make([]byte, 1)
+		_, _ = cryptoRand.Read(b)
+		out[i] = alphabet[int(b[0])%len(alphabet)]
+	}
+	return string(out)
 }
 
 func renderKaptchaSVG(code string) string {
-        return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40">
+	return fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40">
   <rect width="120" height="40" fill="#f0f0f0"/>
   <text x="12" y="28" font-family="monospace" font-size="22" fill="#333">%s</text>
 </svg>`, code)

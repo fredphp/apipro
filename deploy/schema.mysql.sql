@@ -5,30 +5,20 @@
 -- multiple MySQL databases (schemas) sharing the "zb_" prefix.
 -- Schema boundaries match backend-zero's haima_* constants:
 --
---   zb_user       → user, user_grow, room_gift_rank                (haima_user)
---   zb_live       → live_type, live_room, anchors,
---                   match_schedule, match_schedule_room,
---                   live_hot_recommend                              (haima_live)
---   zb_chat       → chat_room_message                              (haima_chat)
---   zb_gift       → (reserved for future gift catalog)             (haima_gift)
---   zb_admin      → (reserved for future admin_user)               (haima_admin)
---   zb_sys        → (reserved for ads/article/sys-msg)             (haima_sys)
---   zb_basketball → (reserved for basketball sport data)
---   zb_football   → (reserved for football sport data)
---
--- IM-related schemas (eim_ prefix, separate from the zb_* set):
---   eim_user      → IM user profiles / online state
---   eim_friend    → IM friend relationships
---   eim_group     → IM group chat
---   eim_admin     → IM admin / config
+--   zb_user  → user, user_grow, room_gift_rank        (haima_user)
+--   zb_live  → live_type, live_room, anchors,
+--              match_schedule, match_schedule_room,
+--              live_hot_recommend                      (haima_live)
+--   zb_chat  → chat_room_message                      (haima_chat)
+--   zb_gift  → (reserved for future gift catalog)     (haima_gift)
+--   zb_admin → (reserved for future admin_user)       (haima_admin)
+--   zb_sys   → (reserved for ads/article/sys-msg)     (haima_sys)
 --
 -- Run:  mysql -u root -p < deploy/schema.mysql.sql
 --
 -- The application DSN must NOT pin a specific database (e.g. use
 -- `root:pass@tcp(127.0.0.1:3306)/?...` — note the empty path) so the
 -- cross-schema JOINs emitted by the model layer work transparently.
--- For per-schema-pool mode (optional), see the Databases map in
--- cmd/api/etc/apipro.yaml and cmd/rpc/etc/apipro.yaml.
 -- =====================================================================
 
 
@@ -240,56 +230,6 @@ CREATE DATABASE IF NOT EXISTS `zb_admin` DEFAULT CHARACTER SET utf8mb4 COLLATE u
 -- Not currently used by apipro; created so the schema prefix is complete.
 -- ---------------------------------------------------------------------
 CREATE DATABASE IF NOT EXISTS `zb_sys` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-
--- ---------------------------------------------------------------------
--- zb_basketball — basketball sport data (teams, leagues, standings).
--- Reserved for future basketball-specific tables; currently match
--- scheduling is handled by zb_live.match_schedule. Created so the
--- schema-prefix machinery knows about this database.
--- ---------------------------------------------------------------------
-CREATE DATABASE IF NOT EXISTS `zb_basketball` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-
--- ---------------------------------------------------------------------
--- zb_football — football sport data (teams, leagues, standings).
--- Reserved for future football-specific tables; currently match
--- scheduling is handled by zb_live.match_schedule. Created so the
--- schema-prefix machinery knows about this database.
--- ---------------------------------------------------------------------
-CREATE DATABASE IF NOT EXISTS `zb_football` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-
--- ---------------------------------------------------------------------
--- eim_user — IM user profiles / online state.
--- Part of the eim_* schema set (IM-related). Reserved for future IM
--- features; created so the schema-prefix machinery knows about it.
--- ---------------------------------------------------------------------
-CREATE DATABASE IF NOT EXISTS `eim_user` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-
--- ---------------------------------------------------------------------
--- eim_friend — IM friend relationships.
--- Part of the eim_* schema set (IM-related). Reserved for future IM
--- features; created so the schema-prefix machinery knows about it.
--- ---------------------------------------------------------------------
-CREATE DATABASE IF NOT EXISTS `eim_friend` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-
--- ---------------------------------------------------------------------
--- eim_group — IM group chat.
--- Part of the eim_* schema set (IM-related). Reserved for future IM
--- features; created so the schema-prefix machinery knows about it.
--- ---------------------------------------------------------------------
-CREATE DATABASE IF NOT EXISTS `eim_group` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-
-
--- ---------------------------------------------------------------------
--- eim_admin — IM admin / config.
--- Part of the eim_* schema set (IM-related). Reserved for future IM
--- features; created so the schema-prefix machinery knows about it.
--- ---------------------------------------------------------------------
-CREATE DATABASE IF NOT EXISTS `eim_admin` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 
 -- =====================================================================
